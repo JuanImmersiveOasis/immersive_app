@@ -1,4 +1,4 @@
-# app.py - Logística Inmersive Oasis (final)
+# app.py - Logística Inmersive Oasis (final actualizado)
 import streamlit as st
 import requests
 from datetime import datetime, date
@@ -52,9 +52,8 @@ def parse_device(p):
         name = props["Name"]["title"][0]["text"]["content"]
     except:
         name = "Sin nombre"
-    locs = []
     try:
-        locs = [r["id"] for r in props.get("Location", {}).get("relation", [])]
+        locs = [r["id"] for r in props["Location"]["relation"]]
     except:
         locs = []
     try:
@@ -121,127 +120,94 @@ def in_house():
         out.append({"id": p["id"], "name": n})
     return out
 
-def client_future():
-    r = q(LOCATIONS_ID, {
-        "filter": {
-            "and": [
-                {"property": "Type", "select": {"equals": "Client"}},
-                {"property": "Start Date", "date": {"after": date.today().isoformat()}}
-            ]
-        }
-    })
+def client_future_and_inhouse():
+    today = date.today()
+    r = q(LOCATIONS_ID)
     out = []
     for p in r:
         try:
-            n = p["properties"]["Name"]["title"][0]["text"]["content"]
+            name = p["properties"]["Name"]["title"][0]["text"]["content"]
         except:
-            n = "Sin nombre"
-        sd = None
-        ed = None
-        try:
-            sd = p["properties"]["Start Date"]["date"]["start"]
-        except:
-            sd = None
-        try:
-            ed = p["properties"]["End Date"]["date"]["start"]
-        except:
-            ed = None
-        out.append({"id": p["id"], "name": n, "start": sd, "end": ed})
+            name = "Sin nombre"
+        t = p["properties"]["Type"]["select"]["name"]
+        sd = p["properties"]["Start Date"]["date"]["start"] if p["properties"]["Start Date"]["date"] else None
+        ed = p["properties"]["End Date"]["date"]["start"] if p["properties"]["End Date"]["date"] else None
+        
+        if (t == "Client" and sd and iso_to_date(sd) >= today) or (t == "In House"):
+            out.append({"id": p["id"], "name": name, "start": sd, "end": ed})
     return out
 
 def assign_device(device_id, location_id):
     return patch(device_id, {"properties": {"Location": {"relation": [{"id": location_id}]}}})
 
-# ---------------- SESSION (CACHE SUAVE) ----------------
+# ---------------- SESSION STATE ----------------
 if "devices" not in st.session_state:
-    st.session_state.devices = load_devices()  # cache inicial
+    st.session_state.devices = load_devices()
 
-# selection lists - will be rebuilt deterministically later
 if "sel_tab1" not in st.session_state:
-    st.session_state.sel_tab1 = []  # names
+    st.session_state.sel_tab1 = []
 if "sel_tab2" not in st.session_state:
-    st.session_state.sel_tab2 = []  # ids
+    st.session_state.sel_tab2 = []
 if "sel_tab3" not in st.session_state:
-    st.session_state.sel_tab3 = []  # ids
+    st.session_state.sel_tab3 = []
 
-# tab1 show flag (only after button)
 if "tab1_show" not in st.session_state:
     st.session_state.tab1_show = False
-
-# tab3 control: envio selected & search flags & available loaded
 if "tab3_envio_selected" not in st.session_state:
     st.session_state.tab3_envio_selected = None
-if "tab3_searched" not in st.session_state:
-    st.session_state.tab3_searched = False
 if "tab3_show_available" not in st.session_state:
     st.session_state.tab3_show_available = False
-
-# last tab for reset
 if "last_tab" not in st.session_state:
     st.session_state.last_tab = None
 
 # ---------------- UI helpers ----------------
 def card_html(name, selected):
-    # original colors you requested
     bg = "#B3E5E6" if selected else "#e0e0e0"
     border = "#00859B" if selected else "#9e9e9e"
-    return f"<div style='padding:8px 12px; background:{bg}; border-left:4px solid {border}; border-radius:6px; margin-bottom:6px;'><b>{name}</b></div>"
+    return f"<div style='padding:8px;background:{bg};border-left:4px solid {border};border-radius:6px;margin-bottom:6px;'><b>{name}</b></div>"
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
     st.markdown("### Navegación")
-    # keep the menu here
     menu = st.radio("", ["Disponibles para Alquilar", "Gafas para Equipo", "Próximos Envíos"])
     st.markdown("---")
-    # Refresh button (opción A)
     if st.button("🔄 Consultar / Refrescar Devices", use_container_width=True):
         st.session_state.devices = load_devices()
-        st.experimental_rerun()
+        st.rerun()
     st.markdown("---")
 
-# reset when tab changes (clean selections and flags)
+# Reset selections when switching tabs
 if st.session_state.last_tab is None:
     st.session_state.last_tab = menu
-
 if menu != st.session_state.last_tab:
-    # clear checkboxes state keys to avoid stale keys
-    # Reinitialize selection lists and flags
     st.session_state.sel_tab1 = []
     st.session_state.sel_tab2 = []
     st.session_state.sel_tab3 = []
     st.session_state.tab1_show = False
     st.session_state.tab3_envio_selected = None
-    st.session_state.tab3_searched = False
     st.session_state.tab3_show_available = False
     st.session_state.last_tab = menu
-    # keep devices cached (cache suave: not forced reload here)
-    st.experimental_rerun()
+    st.rerun()
 
 devices = st.session_state.devices
 
 # ---------------- TAB 1 ----------------
 if menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
-
-    c1, c2 = st.columns(2)
-    with c1:
+    col1, col2 = st.columns(2)
+    with col1:
         start = st.date_input("Fecha inicio", date.today())
-    with c2:
+    with col2:
         end = st.date_input("Fecha fin", date.today())
 
     if st.button("Comprobar disponibilidad"):
         st.session_state.tab1_show = True
-        # reload devices to get latest after action (cache suave: reload on explicit action)
         st.session_state.devices = load_devices()
-        # clear any previous selection keys for tab1 items (they'll be created below)
         st.session_state.sel_tab1 = []
-        st.experimental_rerun()
+        st.rerun()
 
     if st.session_state.tab1_show:
-        # compute available devices for the date range
         avail = [d for d in devices if available(d, start, end)]
-
-        # filters only if tags exist
         tags = sorted({t for t in (x.get("Tags") for x in avail) if t})
         if tags:
             tag_opts = ["Todos"] + tags
@@ -249,40 +215,30 @@ if menu == "Disponibles para Alquilar":
             if ftag != "Todos":
                 avail = [d for d in avail if d.get("Tags") == ftag]
 
-        # Render checkboxes and cards first
         for d in avail:
             key = f"tab1_{d['id']}"
             cols = st.columns([0.5, 9.5])
             with cols[0]:
                 st.checkbox("", key=key)
             with cols[1]:
-                checked = st.session_state.get(key, False)
-                st.markdown(card_html(d["Name"], selected=checked), unsafe_allow_html=True)
+                st.markdown(card_html(d["Name"], st.session_state.get(key, False)), unsafe_allow_html=True)
 
-        # Rebuild selection deterministically
-        new_sel = []
-        for d in avail:
-            key = f"tab1_{d['id']}"
-            if st.session_state.get(key, False):
-                new_sel.append(d["Name"])
-        st.session_state.sel_tab1 = new_sel
-
+        st.session_state.sel_tab1 = [d["Name"] for d in avail if st.session_state.get(f"tab1_{d['id']}", False)]
         total = len(avail)
         sel_count = len(st.session_state.sel_tab1)
 
-        # Sidebar counter + assign form
         with st.sidebar:
             bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
-            st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;font-weight:bold;text-align:center;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;text-align:center;font-weight:bold;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
             st.markdown("---")
             if sel_count > 0:
                 st.markdown("#### Asignar a Cliente")
-                client_name = st.text_input("Nombre Cliente", key="tab1_client_name")
+                client_name = st.text_input("Nombre Cliente")
                 if st.button("Asignar Cliente"):
-                    if not client_name or client_name.strip() == "":
-                        st.error("El nombre del cliente no puede estar vacío")
+                    if not client_name.strip():
+                        st.error("El nombre no puede estar vacío")
                     else:
-                        payload = {
+                        new_loc = create_page({
                             "parent": {"database_id": LOCATIONS_ID},
                             "properties": {
                                 "Name": {"title": [{"text": {"content": client_name.strip()}}]},
@@ -290,209 +246,128 @@ if menu == "Disponibles para Alquilar":
                                 "Start Date": {"date": {"start": start.isoformat()}},
                                 "End Date": {"date": {"start": end.isoformat()}}
                             }
-                        }
-                        resp = create_page(payload)
-                        if resp is None or resp.status_code not in (200, 201):
-                            st.error("Error creando Location Client")
-                        else:
-                            loc_id = resp.json().get("id")
-                            # assign all selected devices
-                            name_to_id = {x["Name"]: x["id"] for x in devices}
-                            assigned = 0
-                            for nm in list(st.session_state.sel_tab1):
-                                did = name_to_id.get(nm)
-                                if did:
-                                    assign_device(did, loc_id)
-                                    assigned += 1
-                            st.success(f"✅ {assigned} dispositivos asignados")
-                            # refresh devices cache (cache suave: reload after changes)
-                            st.session_state.devices = load_devices()
-                            st.session_state.sel_tab1 = []
-                            st.experimental_rerun()
+                        }).json()["id"]
+
+                        name_to_id = {x["Name"]: x["id"] for x in devices}
+                        for nm in st.session_state.sel_tab1:
+                            assign_device(name_to_id[nm], new_loc)
+
+                        st.success("✅ Dispositivos asignados")
+                        st.session_state.devices = load_devices()
+                        st.session_state.sel_tab1 = []
+                        st.rerun()
 
 # ---------------- TAB 2 ----------------
 elif menu == "Gafas para Equipo":
     st.title("Gafas para Equipo")
     oid = office_id()
-    if not oid:
-        st.error("No existe Location con Name = 'Office'. Crea la Location Office en Notion.")
-    else:
-        office_devices = [d for d in devices if oid in d.get("location_ids", [])]
+    office_devices = [d for d in devices if oid in d["location_ids"]]
 
-        # filter by tags only if exist
-        tags = sorted({t for t in (x.get("Tags") for x in office_devices) if t})
-        if tags:
-            tag_opts = ["Todos"] + tags
-            ftag = st.selectbox("Filtrar por tipo", options=tag_opts)
-            if ftag != "Todos":
-                office_devices = [d for d in office_devices if d.get("Tags") == ftag]
+    tags = sorted({t for t in (x.get("Tags") for x in office_devices) if t})
+    if tags:
+        tag_opts = ["Todos"] + tags
+        ftag = st.selectbox("Filtrar por tipo", options=tag_opts)
+        if ftag != "Todos":
+            office_devices = [d for d in office_devices if d.get("Tags") == ftag]
 
-        # render list with checkboxes
-        for d in office_devices:
-            key = f"tab2_{d['id']}"
-            cols = st.columns([0.5, 9.5])
-            with cols[0]:
-                st.checkbox("", key=key)
-            with cols[1]:
-                checked = st.session_state.get(key, False)
-                st.markdown(card_html(d["Name"], selected=checked), unsafe_allow_html=True)
+    for d in office_devices:
+        key = f"tab2_{d['id']}"
+        cols = st.columns([0.5, 9.5])
+        with cols[0]:
+            st.checkbox("", key=key)
+        with cols[1]:
+            st.markdown(card_html(d["Name"], st.session_state.get(key, False)), unsafe_allow_html=True)
 
-        # rebuild selection ids
-        new_sel_ids = []
-        for d in office_devices:
-            key = f"tab2_{d['id']}"
-            if st.session_state.get(key, False):
-                new_sel_ids.append(d["id"])
-        st.session_state.sel_tab2 = new_sel_ids
+    st.session_state.sel_tab2 = [d["id"] for d in office_devices if st.session_state.get(f"tab2_{d['id']}", False)]
+    total = len(office_devices)
+    sel_count = len(st.session_state.sel_tab2)
 
-        total = len(office_devices)
-        sel_count = len(st.session_state.sel_tab2)
-
-        # sidebar counter + mover control
-        with st.sidebar:
-            bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
-            st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;font-weight:bold;text-align:center;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
-            st.markdown("---")
-            if sel_count > 0:
-                st.markdown("#### Mover a In House")
-                inh = in_house()
-                if not inh:
-                    st.info("No hay In House definidas en Notion.")
-                else:
-                    dest_names = [x["name"] for x in inh]
-                    dest_choice = st.selectbox("Destino:", dest_names, key="inhouse_choice_sidebar")
-                    if st.button("Mover seleccionadas"):
-                        dest_id = next(x["id"] for x in inh if x["name"] == dest_choice)
-                        moved = 0
-                        for did in list(st.session_state.sel_tab2):
-                            assign_device(did, dest_id)
-                            moved += 1
-                        st.success(f"✅ {moved} dispositivos movidos")
-                        st.session_state.devices = load_devices()
-                        st.session_state.sel_tab2 = []
-                        st.experimental_rerun()
+    with st.sidebar:
+        bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
+        st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;text-align:center;font-weight:bold;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
+        st.markdown("---")
+        if sel_count > 0:
+            inh = in_house()
+            dest = st.selectbox("Mover a In House:", [x["name"] for x in inh])
+            if st.button("Mover seleccionadas"):
+                dest_id = next(x["id"] for x in inh if x["name"] == dest)
+                for did in st.session_state.sel_tab2:
+                    assign_device(did, dest_id)
+                st.success("✅ Movidas")
+                st.session_state.devices = load_devices()
+                st.session_state.sel_tab2 = []
+                st.rerun()
 
 # ---------------- TAB 3 ----------------
 else:
     st.title("Próximos Envíos")
 
-    # Selector with "Seleccionar..." default and Buscar to the right
-    col_sel, col_btn = st.columns([8, 2])
-    with col_sel:
-        # options: placeholder + actual names
-        locs = client_future()
-        options = ["Seleccionar..."] + [x["name"] for x in locs]
-        sel_name = st.selectbox("Selecciona envío:", options, index=0)
-    with col_btn:
-        # visual indicator plus action: button active only if selection != placeholder
-        buscar_activo = sel_name != "Seleccionar..."
-        if buscar_activo:
-            # when clicked, set flags and load assigned
-            if st.button("Buscar"):
-                # find selected loc
-                selected_loc = next((x for x in locs if x["name"] == sel_name), None)
-                if selected_loc:
-                    st.session_state.tab3_envio_selected = selected_loc["id"]
-                    st.session_state.tab3_searched = True
-                    st.session_state.tab3_show_available = False
-                    # reload devices cache (cache suave)
-                    st.session_state.devices = load_devices()
-                    st.experimental_rerun()
-        else:
-            # show disabled button (visual only — clicking does nothing)
-            st.markdown("<button disabled style='width:100%'>Buscar</button>", unsafe_allow_html=True)
+    locs = client_future_and_inhouse()
+    options = ["Seleccionar..."] + [l["name"] for l in locs]
+    sel_name = st.selectbox("Selecciona envío:", options, index=0)
 
-    # Only after pressing Buscar we show Assigned accordion and sidebar counter
-    if st.session_state.tab3_searched and st.session_state.tab3_envio_selected:
-        # find the location object (from locs)
-        selected_loc_obj = next((x for x in locs if x["id"] == st.session_state.tab3_envio_selected), None)
-        loc_id = st.session_state.tab3_envio_selected
+    if sel_name != "Seleccionar...":
+        selected_loc = next(x for x in locs if x["name"] == sel_name)
+        loc_id = selected_loc["id"]
 
-        # Assigned section inside expander (collapsed by default) - user chose Option B
-        with st.expander(f"📦 Ver dispositivos asignados ({len([d for d in devices if loc_id in d.get('location_ids',[])])})", expanded=False):
-            assigned = [d for d in devices if loc_id in d.get("location_ids", [])]
-            if not assigned:
-                st.info("No hay dispositivos asignados a esta Location.")
-            else:
-                for d in assigned:
-                    cols = st.columns([9, 1])
-                    with cols[0]:
-                        st.markdown(card_html(d["Name"], selected=False), unsafe_allow_html=True)
-                    with cols[1]:
-                        # medium-size X button
-                        if st.button("✕", key=f"tab3_rem_{d['id']}", help="Quitar dispositivo (vuelve a Office)"):
-                            office = office_id()
-                            if not office:
-                                st.error("No existe Location 'Office' para reasignar.")
-                            else:
-                                assign_device(d["id"], office)
-                                st.session_state.devices = load_devices()
-                                st.experimental_rerun()
+        st.write(f"📅 **Inicio:** {selected_loc['start']} — **Fin:** {selected_loc['end']}")
+        st.markdown("---")
 
-        # Sidebar counter present only after Buscar (counts selected to add / total available once loaded)
-        # Show "Buscar disponibles" button below assigned accordion (in main area)
-        if not st.session_state.tab3_show_available:
-            if st.button("Buscar disponibles"):
-                # compute available and show next render
-                st.session_state.tab3_show_available = True
-                st.experimental_rerun()
+        assigned = [d for d in devices if loc_id in d["location_ids"]]
 
-        # If we asked to show available, calculate and render them (deferred)
+        with st.expander(f"📦 Ver dispositivos asignados ({len(assigned)})", expanded=False):
+            for d in assigned:
+                cols = st.columns([9, 1])
+                with cols[0]:
+                    st.markdown(card_html(d["Name"], False), unsafe_allow_html=True)
+                with cols[1]:
+                    if st.button("✕", key=f"r_{d['id']}"):
+                        office = office_id()
+                        assign_device(d["id"], office)
+                        st.session_state.devices = load_devices()
+                        st.rerun()
+
+        if st.button("Buscar disponibles"):
+            st.session_state.tab3_show_available = True
+            st.rerun()
+
         if st.session_state.tab3_show_available:
-            # compute can_add by dates in selected_loc_obj
-            ls = iso_to_date(selected_loc_obj.get("start"))
-            le = iso_to_date(selected_loc_obj.get("end"))
-            if not ls or not le:
-                st.warning("Esta Location no tiene fechas definidas correctamente.")
-            else:
-                can_add = [d for d in devices if available(d, ls, le) and (loc_id not in d.get("location_ids", []))]
+            ls = iso_to_date(selected_loc["start"])
+            le = iso_to_date(selected_loc["end"])
+            can_add = [d for d in devices if available(d, ls, le) and loc_id not in d["location_ids"]]
 
-                # show filters only if tags exist
-                tags = sorted({t for t in (x.get("Tags") for x in can_add) if t})
-                if tags:
-                    tag_opts = ["Todos"] + tags
-                    ftag = st.selectbox("Filtrar por tipo", options=tag_opts)
-                    if ftag != "Todos":
-                        can_add = [d for d in can_add if d.get("Tags") == ftag]
+            tags = sorted({t for t in (x.get("Tags") for x in can_add) if t})
+            if tags:
+                tag_opts = ["Todos"] + tags
+                ftag = st.selectbox("Filtrar por tipo", options=tag_opts)
+                if ftag != "Todos":
+                    can_add = [d for d in can_add if d.get("Tags") == ftag]
 
-                # Render checkboxes and cards
-                for d in can_add:
-                    key = f"tab3_add_{d['id']}"
-                    cols = st.columns([0.5, 9.5])
-                    with cols[0]:
-                        st.checkbox("", key=key)
-                    with cols[1]:
-                        checked = st.session_state.get(key, False)
-                        st.markdown(card_html(d["Name"], selected=checked), unsafe_allow_html=True)
+            for d in can_add:
+                key = f"tab3_{d['id']}"
+                cols = st.columns([0.5, 9.5])
+                with cols[0]:
+                    st.checkbox("", key=key)
+                with cols[1]:
+                    st.markdown(card_html(d["Name"], st.session_state.get(key, False)), unsafe_allow_html=True)
 
-                # Rebuild sel_tab3 deterministically
-                new_sel = []
-                for d in can_add:
-                    key = f"tab3_add_{d['id']}"
-                    if st.session_state.get(key, False):
-                        new_sel.append(d["id"])
-                st.session_state.sel_tab3 = new_sel
+            st.session_state.sel_tab3 = [d["id"] for d in can_add if st.session_state.get(f"tab3_{d['id']}", False)]
+            total = len(can_add)
+            sel_count = len(st.session_state.sel_tab3)
 
-                total = len(can_add)
-                sel_count = len(st.session_state.sel_tab3)
-
-                # Sidebar counter + Add button
-                with st.sidebar:
-                    bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
-                    st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;font-weight:bold;text-align:center;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
-                    st.markdown("---")
-                    if sel_count > 0:
-                        if st.button("Añadir seleccionadas"):
-                            added = 0
-                            for did in list(st.session_state.sel_tab3):
-                                assign_device(did, loc_id)
-                                added += 1
-                            st.success(f"✅ {added} dispositivos añadidos")
-                            # reload devices after change (cache suave)
-                            st.session_state.devices = load_devices()
-                            st.session_state.sel_tab3 = []
-                            st.experimental_rerun()
+            with st.sidebar:
+                bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
+                st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;text-align:center;font-weight:bold;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
+                st.markdown("---")
+                if sel_count > 0:
+                    if st.button("Añadir seleccionadas"):
+                        for did in st.session_state.sel_tab3:
+                            assign_device(did, loc_id)
+                        st.success("✅ Añadidas")
+                        st.session_state.devices = load_devices()
+                        st.session_state.sel_tab3 = []
+                        st.rerun()
 
 # ---------------- FOOTER ----------------
 st.markdown("---")
-st.markdown("Notas: cache suave activado (se recargan dispositivos automáticamente tras operaciones de asignación). Usa 'Buscar' en 'Próximos Envíos' para cargar asignadas, y 'Buscar disponibles' para cargar las opciones de añadir (carga diferida).")
+st.caption("Logística Inmersive Oasis — cache suave activado.")
