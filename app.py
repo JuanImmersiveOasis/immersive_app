@@ -1,3 +1,4 @@
+# app.py - Corregido: contador reconstruido desde st.session_state (robusto)
 import streamlit as st
 import requests
 from datetime import datetime, date
@@ -149,14 +150,13 @@ def assign_device(device_id, location_id):
 if "devices" not in st.session_state:
     st.session_state.devices = load_devices()
 
+# selection lists are maintained but will be reconstructed each render
 if "sel_tab1" not in st.session_state:
-    st.session_state.sel_tab1 = []   # list of device names
-
+    st.session_state.sel_tab1 = []   # names
 if "sel_tab2" not in st.session_state:
-    st.session_state.sel_tab2 = []   # list of device ids
-
+    st.session_state.sel_tab2 = []   # ids
 if "sel_tab3" not in st.session_state:
-    st.session_state.sel_tab3 = []   # list of device ids to add
+    st.session_state.sel_tab3 = []   # ids to add
 
 if "tab1_show" not in st.session_state:
     st.session_state.tab1_show = False
@@ -169,7 +169,7 @@ with st.sidebar:
     menu = st.radio("Navegación", ["Disponibles para Alquilar", "Gafas para Equipo", "Próximos Envíos"])
     st.markdown("---")
 
-# on tab change: reset selections and refresh devices
+# on tab change: reset and refresh
 if "last_tab" not in st.session_state:
     st.session_state.last_tab = menu
 
@@ -187,7 +187,7 @@ devices = st.session_state.devices
 
 # ---------------- UI helpers ----------------
 def card_html(name, selected):
-    bg = "#B3E5E6" if selected else "#e0e0e0"
+    bg = "#B3E5E6" if selected else "#e0e0e0"   # estilo original pedido
     border = "#00859B" if selected else "#9e9e9e"
     return f"<div style='padding:8px 12px; background:{bg}; border-left:4px solid {border}; border-radius:6px; margin-bottom:6px;'><b>{name}</b></div>"
 
@@ -209,18 +209,34 @@ if menu == "Disponibles para Alquilar":
 
     if st.session_state.tab1_show:
         avail = [d for d in devices if available(d, start, end)]
-        # filter by tag
         tags = sorted({t for t in (x.get("Tags") for x in avail) if t})
         tag_opts = ["Todos"] + tags
         ftag = st.selectbox("Filtrar por tipo", options=tag_opts)
         if ftag != "Todos":
             avail = [d for d in avail if d.get("Tags") == ftag]
 
-        total = len(avail)
-        # ensure sidebar counter always shows current selected count
-        sel_count = len(st.session_state.sel_tab1)
+        # Render checkboxes and cards (checkboxes must be created before we reconstruct selection list)
+        for d in avail:
+            key = f"a_{d['id']}"
+            cols = st.columns([0.5, 9.5])
+            with cols[0]:
+                # create checkbox widget; don't use returned value directly
+                st.checkbox("", key=key)
+            with cols[1]:
+                checked_state = st.session_state.get(key, False)
+                st.markdown(card_html(d["Name"], selected=checked_state), unsafe_allow_html=True)
 
-        # Sidebar: counter + assign form if selection > 0
+        # Rebuild selection list deterministically from session_state
+        new_sel = []
+        for d in avail:
+            key = f"a_{d['id']}"
+            if st.session_state.get(key, False):
+                new_sel.append(d["Name"])
+        st.session_state.sel_tab1 = new_sel
+
+        # Sidebar shows counter and assign form
+        total = len(avail)
+        sel_count = len(st.session_state.sel_tab1)
         with st.sidebar:
             bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
             st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;font-weight:bold;text-align:center;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
@@ -258,25 +274,6 @@ if menu == "Disponibles para Alquilar":
                             st.session_state.devices = load_devices()
                             st.rerun()
 
-        # MAIN: list devices. Use checkbox keys and read st.session_state after render.
-        for d in avail:
-            key = f"a_{d['id']}"
-            # render checkbox with key (this creates st.session_state[key])
-            cols = st.columns([0.5, 9.5])
-            with cols[0]:
-                st.checkbox("", key=key)
-            with cols[1]:
-                # read checkbox state from session_state
-                checked = st.session_state.get(key, False)
-                st.markdown(card_html(d["Name"], selected=checked), unsafe_allow_html=True)
-
-            # sync selection list (names)
-            checked_now = st.session_state.get(key, False)
-            if checked_now and d["Name"] not in st.session_state.sel_tab1:
-                st.session_state.sel_tab1.append(d["Name"])
-            if not checked_now and d["Name"] in st.session_state.sel_tab1:
-                st.session_state.sel_tab1.remove(d["Name"])
-
 # ---------------- TAB 2 ----------------
 elif menu == "Gafas para Equipo":
     st.title("Gafas para Equipo")
@@ -291,9 +288,27 @@ elif menu == "Gafas para Equipo":
         if ftag != "Todos":
             office_devices = [d for d in office_devices if d.get("Tags") == ftag]
 
+        # Render checkboxes + cards
+        for d in office_devices:
+            key = f"o_{d['id']}"
+            cols = st.columns([0.5, 9.5])
+            with cols[0]:
+                st.checkbox("", key=key)
+            with cols[1]:
+                checked_state = st.session_state.get(key, False)
+                st.markdown(card_html(d["Name"], selected=checked_state), unsafe_allow_html=True)
+
+        # Rebuild sel_tab2 deterministically (ids)
+        new_sel_ids = []
+        for d in office_devices:
+            key = f"o_{d['id']}"
+            if st.session_state.get(key, False):
+                new_sel_ids.append(d["id"])
+        st.session_state.sel_tab2 = new_sel_ids
+
+        # Sidebar counter + mover controls
         total = len(office_devices)
         sel_count = len(st.session_state.sel_tab2)
-
         with st.sidebar:
             bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
             st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;font-weight:bold;text-align:center;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
@@ -317,23 +332,6 @@ elif menu == "Gafas para Equipo":
                         st.session_state.devices = load_devices()
                         st.rerun()
 
-        # MAIN: list office devices
-        for d in office_devices:
-            key = f"o_{d['id']}"
-            cols = st.columns([0.5, 9.5])
-            with cols[0]:
-                st.checkbox("", key=key)
-            with cols[1]:
-                checked = st.session_state.get(key, False)
-                st.markdown(card_html(d["Name"], selected=checked), unsafe_allow_html=True)
-
-            # sync selection list (ids)
-            checked_now = st.session_state.get(key, False)
-            if checked_now and d["id"] not in st.session_state.sel_tab2:
-                st.session_state.sel_tab2.append(d["id"])
-            if not checked_now and d["id"] in st.session_state.sel_tab2:
-                st.session_state.sel_tab2.remove(d["id"])
-
 # ---------------- TAB 3 ----------------
 else:
     st.title("Próximos Envíos")
@@ -349,7 +347,7 @@ else:
 
         loc_id = loc["id"]
 
-        # if envio changed, reset selection/add list
+        # Reset when envio changes
         if st.session_state.last_envio != loc_id:
             st.session_state.last_envio = loc_id
             st.session_state.sel_tab3 = []
@@ -358,7 +356,7 @@ else:
         st.write(f"Inicio: {loc.get('start') or '-'} — Fin: {loc.get('end') or '-'}")
         st.markdown("---")
 
-        # Assigned items with X button (size medium ~22px via styling)
+        # Assigned with X
         assigned = [d for d in devices if loc_id in d.get("location_ids", [])]
         st.subheader("Asignadas:")
         if not assigned:
@@ -369,7 +367,6 @@ else:
                 with cols[0]:
                     st.markdown(card_html(d["Name"], selected=False), unsafe_allow_html=True)
                 with cols[1]:
-                    # X button styled to be medium size: we use markdown with a button-like link that triggers via st.button
                     if st.button("✕", key=f"x_{d['id']}", help="Quitar dispositivo"):
                         office = office_id()
                         if not office:
@@ -393,10 +390,28 @@ else:
             if ftag != "Todos":
                 can_add = [d for d in can_add if d.get("Tags") == ftag]
 
+            # Render checkboxes + cards
+            for d in can_add:
+                key = f"c_{d['id']}"
+                cols = st.columns([0.5, 9.5])
+                with cols[0]:
+                    st.checkbox("", key=key)
+                with cols[1]:
+                    checked_state = st.session_state.get(key, False)
+                    st.markdown(card_html(d["Name"], selected=checked_state), unsafe_allow_html=True)
+
+            # Rebuild sel_tab3 deterministically (ids)
+            new_sel = []
+            for d in can_add:
+                key = f"c_{d['id']}"
+                if st.session_state.get(key, False):
+                    new_sel.append(d["id"])
+            st.session_state.sel_tab3 = new_sel
+
             total = len(can_add)
             sel_count = len(st.session_state.sel_tab3)
 
-            # Sidebar: unified counter + Add button
+            # Sidebar: counter + add button
             with st.sidebar:
                 bg = "#e0e0e0" if sel_count == 0 else "#B3E5E6"
                 st.markdown(f"<div style='padding:8px;background:{bg};border-radius:6px;font-weight:bold;text-align:center;'>{sel_count} / {total} dispositivos</div>", unsafe_allow_html=True)
@@ -411,20 +426,3 @@ else:
                         st.session_state.sel_tab3 = []
                         st.session_state.devices = load_devices()
                         st.rerun()
-
-            # Main: list can_add with checkboxes
-            for d in can_add:
-                key = f"c_{d['id']}"
-                cols = st.columns([0.5, 9.5])
-                with cols[0]:
-                    st.checkbox("", key=key)
-                with cols[1]:
-                    checked = st.session_state.get(key, False)
-                    st.markdown(card_html(d["Name"], selected=checked), unsafe_allow_html=True)
-
-                # sync sel_tab3 (ids)
-                checked_now = st.session_state.get(key, False)
-                if checked_now and d["id"] not in st.session_state.sel_tab3:
-                    st.session_state.sel_tab3.append(d["id"])
-                if not checked_now and d["id"] in st.session_state.sel_tab3:
-                    st.session_state.sel_tab3.remove(d["id"])
