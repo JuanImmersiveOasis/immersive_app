@@ -205,8 +205,35 @@ if "show_avail_tab3" not in st.session_state:
 
 # ---------------- SIDEBAR NAV ----------------
 with st.sidebar:
+
+ # --- Botón fijo ---
+    st.markdown('<div class="refresh-fixed-sidebar">', unsafe_allow_html=True)
+    if st.button("🔄 Refrescar", key="refresh_cache_fixed", use_container_width=True):
+        clear_all_cache()
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
     menu = st.radio("Navegación", ["Disponibles para Alquilar", "Gafas para Equipo", "Próximos Envíos"])
     st.markdown("----")
+
+    # --- CSS para dejar el botón fijo abajo a la izquierda ---
+    st.markdown(
+        """
+        <style>
+        .refresh-fixed-sidebar {
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            z-index: 9999;
+            width: 180px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+   
+
 
 
 # ---------------- TAB 1: Disponibles para Alquilar ----------------
@@ -446,35 +473,3 @@ else:
                         st.rerun()
 
 
-# ---------------- GLOBAL FIXED REFRESH BUTTON ----------------
-# Estilos CSS para posicionar los botones en la esquina inferior izquierda
-st.markdown(
-    """
-    <style>
-    .fixed-buttons {
-        position: fixed;
-        bottom: 12px;
-        left: 12px;
-        display: flex;
-        gap: 8px;
-        z-index: 999;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# Crear dos columnas para los botones
-col_btn1, col_btn2 = st.columns([1, 1])
-
-with col_btn1:
-    # Botón para refrescar la página
-    if st.button("🔄 Refrescar", key="refresh_page", help="Recarga la página completa"):
-        st.rerun()
-
-with col_btn2:
-    # Botón para limpiar caché y recargar datos de Notion
-    if st.button("🗑️ Limpiar Caché", key="clear_cache", help="Borra datos guardados y recarga desde Notion"):
-        clear_all_cache()
-        st.success("✅ Caché limpiado - Recargando datos de Notion...")
-        st.rerun()
