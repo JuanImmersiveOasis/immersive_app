@@ -447,14 +447,34 @@ else:
 
 
 # ---------------- GLOBAL FIXED REFRESH BUTTON ----------------
+# Estilos CSS para posicionar los botones en la esquina inferior izquierda
 st.markdown(
     """
-    <div style="position:fixed; bottom:12px; left:12px;">
-        <form action="#" method="post">
-            <button style="padding:8px 14px;background:#444;color:white;border:none;border-radius:6px;"
-             onclick="window.location.reload();">🔄 Refrescar</button>
-        </form>
-    </div>
+    <style>
+    .fixed-buttons {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        display: flex;
+        gap: 8px;
+        z-index: 999;
+    }
+    </style>
     """,
     unsafe_allow_html=True
 )
+
+# Crear dos columnas para los botones
+col_btn1, col_btn2 = st.columns([1, 1])
+
+with col_btn1:
+    # Botón para refrescar la página
+    if st.button("🔄 Refrescar", key="refresh_page", help="Recarga la página completa"):
+        st.rerun()
+
+with col_btn2:
+    # Botón para limpiar caché y recargar datos de Notion
+    if st.button("🗑️ Limpiar Caché", key="clear_cache", help="Borra datos guardados y recarga desde Notion"):
+        clear_all_cache()
+        st.success("✅ Caché limpiado - Recargando datos de Notion...")
+        st.rerun()
