@@ -160,39 +160,68 @@ def clear_all_cache():
 # ---------------- UI HELP ----------------
 def card(name, location_types=None, selected=False):
     """
-    Tarjeta con nombre y tipos de location a la derecha.
+    Tarjeta con nombre y badge de tipo de location a la derecha.
     Fondo según tipo:
       - Office: verde claro
       - In House: azul claro
       - Client: naranja claro
-    Seleccionado → gris
+    Seleccionado → gris, pero badge mantiene color.
+    Tooltip al hacer hover con explicación del tipo.
     """
-    color_map = {
+    # Colores de fondo de card
+    color_map_bg = {
         "Office": "#D5EAD6",    # verde claro
         "In House": "#D2E9FC",  # azul claro
         "Client": "#FFEAC9",    # naranja claro
     }
+    # Colores del badge
+    color_map_badge = {
+        "Office": "#4CAF50",    # verde oscuro
+        "In House": "#1565C0",  # azul oscuro
+        "Client": "#FF9800",    # naranja oscuro
+    }
+    # Mapear letra para el badge
+    badge_letter_map = {
+        "Office": "O",
+        "In House": "H",
+        "Client": "C"
+    }
+    # Mapear tooltip según tipo
+    tooltip_map = {
+        "Office": "Las gafas O se encuentran en la oficina.",
+        "In House": "Las gafas H se encuentran en casa de alguna persona del equipo.",
+        "Client": "Las gafas C se encuentran asignadas a un proyecto en este momento."
+    }
 
-    bg = "#e0e0e0"  # default
+    # Fondo de la card
+    bg = "#e0e0e0"
+    badge_html = ""
+    tooltip_text = ""
     if location_types:
         first_type = location_types.split(" • ")[0]
-        bg = color_map.get(first_type, "#e0e0e0")
+        bg = color_map_bg.get(first_type, "#e0e0e0")
+        badge_color = color_map_badge.get(first_type, "#9e9e9e")
+        letter = badge_letter_map.get(first_type, "?")
+        tooltip_text = tooltip_map.get(first_type, "")
+        # Badge a la derecha del card, con tooltip
+        badge_html = f"<span title='{tooltip_text}' style='float:right;width:20px;height:20px;" \
+                     f"line-height:20px;text-align:center;font-weight:bold;color:#fff;background:{badge_color};" \
+                     f"border-radius:4px;margin-left:8px'>{letter}</span>"
 
     if selected:
-        bg = "#BDBDBD"
-
-    subtitle_html = f"<div style='font-size:12px;color:#444;float:right;margin-left:8px'>{location_types}</div>" if location_types else ""
+        bg = "#BDBDBD"  # fondo gris si está seleccionado
 
     st.markdown(
         f"""
         <div style='padding:7px;background:{bg};border-left:4px solid #9e9e9e;border-radius:6px;margin-bottom:4px;overflow:auto;'>
-            <b>{name}</b>
-            {subtitle_html}
+            <b>{name}</b> {badge_html}
             <div style='clear:both;'></div>
         </div>
         """,
         unsafe_allow_html=True
     )
+
+
 
 def counter_badge(selected, total):
     if selected > 0:
