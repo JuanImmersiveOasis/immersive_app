@@ -59,6 +59,28 @@ def assign_device(dev_id, loc_id):
         "properties": {"Location": {"relation": [{"id": loc_id}]}}
     }, headers=headers)
 
+# ---------------- LOAD MAP OF LOCATIONS ----------------
+@st.cache_data(show_spinner=False)
+def load_locations_map():
+    """
+    Devuelve un diccionario id -> {"name": ..., "type": ...}
+    """
+    results = q(LOCATIONS_ID)
+    out = {}
+    for p in results:
+        pid = p["id"]
+        props = p["properties"]
+        try:
+            name = props["Name"]["title"][0]["text"]["content"]
+        except:
+            name = "Sin nombre"
+        try:
+            t = props["Type"]["select"]["name"]
+        except:
+            t = None
+        out[pid] = {"name": name, "type": t}
+    return out
+
 # ---------------- CACHED LOADERS ----------------
 @st.cache_data(show_spinner=False)
 def load_devices():
@@ -67,7 +89,8 @@ def load_devices():
     for p in results:
         props = p["properties"]
         name = props["Name"]["title"][0]["text"]["content"] if props["Name"]["title"] else "Sin nombre"
-        locs = [r["id"] for r in props["Location"]["relation"]]
+        locs = [r["id"] for r in props["Location"]["relation"]] if props["Location"]["relation"] else []
+        tag = props["Tags"]["select"]["name"] if props["Tags"]["select"] else None
 
         def roll(field):
             try:
@@ -83,6 +106,7 @@ def load_devices():
         out.append({
             "id": p["id"],
             "Name": name,
+            "Tags": tag,
             "location_ids": locs,
             "Start": roll("Start Date"),
             "End": roll("End Date")
@@ -91,24 +115,16 @@ def load_devices():
     return sorted(out, key=lambda x: x["Name"])
 
 @st.cache_data(show_spinner=False)
-def load_locations_map():
-    results = q(LOCATIONS_ID)
-    out = {}
-    for p in results:
-        props = p["properties"]
-        loc_name = props["Name"]["title"][0]["text"]["content"]
-        loc_type = props["Type"]["select"]["name"] if props["Type"]["select"] else "Sin Tipo"
-        out[p["id"]] = {"name": loc_name, "type": loc_type}
-    return out
-
-@st.cache_data(show_spinner=False)
 def load_future_client_locations():
     today = date.today()
     results = q(LOCATIONS_ID)
     out = []
     for p in results:
         props = p["properties"]
-        t = props["Type"]["select"]["name"]
+        try:
+            t = props["Type"]["select"]["name"]
+        except:
+            t = None
         if t != "Client":
             continue
         sd = props["Start Date"]["date"]["start"] if props["Start Date"]["date"] else None
@@ -122,7 +138,14 @@ def load_future_client_locations():
 @st.cache_data(show_spinner=False)
 def load_inhouse():
     r = q(LOCATIONS_ID, {"filter": {"property": "Type", "select": {"equals": "In House"}}})
-    return [{"id": p["id"], "name": p["properties"]["Name"]["title"][0]["text"]["content"]} for p in r]
+    out = []
+    for p in r:
+        try:
+            nm = p["properties"]["Name"]["title"][0]["text"]["content"]
+        except:
+            nm = "Sin nombre"
+        out.append({"id": p["id"], "name": nm})
+    return out
 
 def office_id():
     r = q(LOCATIONS_ID, {"filter": {"property": "Name", "title": {"equals": "Office"}}})
@@ -135,12 +158,39 @@ def clear_all_cache():
     load_locations_map.clear()
 
 # ---------------- UI HELP ----------------
-def card(name, loc_type=None, selected=False):
-    bg = "#B3E5E6" if selected else "#e0e0e0"
-    border = "#00859B" if selected else "#9e9e9e"
-    t = f"<span style='font-size:12px;color:#555;margin-left:8px;'>({loc_type})</span>" if loc_type else ""
+def card(name, location_types=None, selected=False):
+    """
+    Tarjeta con nombre y tipos de location a la derecha.
+    Fondo según tipo:
+      - Office: verde claro
+      - In House: azul claro
+      - Client: naranja claro
+    Seleccionado → gris
+    """
+    color_map = {
+        "Office": "#D5EAD6",    # verde claro
+        "In House": "#D2E9FC",  # azul claro
+        "Client": "#FFEAC9",    # naranja claro
+    }
+
+    bg = "#e0e0e0"  # default
+    if location_types:
+        first_type = location_types.split(" • ")[0]
+        bg = color_map.get(first_type, "#e0e0e0")
+
+    if selected:
+        bg = "#BDBDBD"
+
+    subtitle_html = f"<div style='font-size:12px;color:#444;float:right;margin-left:8px'>{location_types}</div>" if location_types else ""
+
     st.markdown(
-        f"<div style='padding:7px;background:{bg};border-left:4px solid {border};border-radius:6px;margin-bottom:4px;'><b>{name}</b>{t}</div>",
+        f"""
+        <div style='padding:7px;background:{bg};border-left:4px solid #9e9e9e;border-radius:6px;margin-bottom:4px;overflow:auto;'>
+            <b>{name}</b>
+            {subtitle_html}
+            <div style='clear:both;'></div>
+        </div>
+        """,
         unsafe_allow_html=True
     )
 
@@ -155,6 +205,21 @@ def counter_badge(selected, total):
         f"<div style='background:{bg};color:{tc};padding:12px 16px;border-radius:8px;text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;box-shadow:0 2px 4px rgba(0,0,0,0.1);'>{selected} / {total} seleccionadas</div>",
         unsafe_allow_html=True
     )
+
+# ---------------- AUX ----------------
+def get_location_types_for_device(dev, loc_map):
+    types = []
+    for lid in dev.get("location_ids", []):
+        entry = loc_map.get(lid)
+        if entry and entry.get("type"):
+            types.append(entry["type"])
+    seen = set()
+    uniq = []
+    for t in types:
+        if t not in seen:
+            uniq.append(t)
+            seen.add(t)
+    return " • ".join(uniq) if uniq else None
 
 # ---------------- STATE ----------------
 for key, default in [("tab1_show", False), ("sel1", []), ("sel2", []), ("sel3", []), ("tab3_loc", None), ("show_avail_tab3", False)]:
@@ -184,6 +249,9 @@ with st.sidebar:
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
+# Pre-cargar mapa de locations
+locations_map = load_locations_map()
+
 # ---------------- TAB 1 ----------------
 if menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
@@ -197,21 +265,13 @@ if menu == "Disponibles para Alquilar":
 
     if st.session_state.tab1_show:
         devices = load_devices()
-        loc_map = load_locations_map()
-
-        # ✅ Solo dispositivos con location asignada
-        avail = [
-            d for d in devices
-            if d["location_ids"] and available(d, start, end)
-        ]
-
+        avail = [d for d in devices if d.get("location_ids") and available(d, start, end)]
         for d in avail:
-            loc_type = loc_map[d["location_ids"][0]]["type"]
             key = f"a_{d['id']}"
+            subtitle = get_location_types_for_device(d, locations_map)
             cols = st.columns([0.5, 9.5])
             with cols[0]: st.checkbox("", key=key)
-            with cols[1]: card(d["Name"], loc_type, st.session_state.get(key, False))
-
+            with cols[1]: card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
         st.session_state.sel1 = [d["id"] for d in avail if st.session_state.get(f"a_{d['id']}", False)]
         sel_count = len(st.session_state.sel1)
 
@@ -235,6 +295,8 @@ if menu == "Disponibles para Alquilar":
                     progress_bar.progress(0.2)
 
                     for idx, did in enumerate(st.session_state.sel1):
+                        device_name = next((d["Name"] for d in avail if d["id"] == did), "Dispositivo")
+                        status_text.text(f"⚙️ Asignando {idx + 1}: {device_name}")
                         assign_device(did, new)
                         progress_bar.progress(0.2 + 0.8 * (idx + 1) / len(st.session_state.sel1))
 
@@ -250,14 +312,12 @@ elif menu == "Gafas para Equipo":
     oid = office_id()
     office_devices = [d for d in devices if oid in d["location_ids"]]
 
-    loc_map = load_locations_map()
-
     for d in office_devices:
-        loc_type = loc_map[d["location_ids"][0]]["type"]
         key = f"o_{d['id']}"
+        subtitle = get_location_types_for_device(d, locations_map)
         cols = st.columns([0.5, 9.5])
         with cols[0]: st.checkbox("", key=key)
-        with cols[1]: card(d["Name"], loc_type, st.session_state.get(key, False))
+        with cols[1]: card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
 
     st.session_state.sel2 = [d["id"] for d in office_devices if st.session_state.get(f"o_{d['id']}", False)]
     sel_count = len(st.session_state.sel2)
@@ -272,6 +332,8 @@ elif menu == "Gafas para Equipo":
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 for idx, did in enumerate(st.session_state.sel2):
+                    device_name = next((d["Name"] for d in office_devices if d["id"] == did), "Dispositivo")
+                    status_text.text(f"📦 Moviendo {idx + 1}: {device_name}")
                     assign_device(did, dest_id)
                     progress_bar.progress((idx + 1) / sel_count)
                 status_text.empty()
@@ -299,7 +361,8 @@ else:
             for d in assigned:
                 cols = st.columns([9, 1])
                 with cols[0]:
-                    card(d["Name"], "Client")
+                    subtitle = get_location_types_for_device(d, locations_map)
+                    card(d["Name"], location_types=subtitle)
                 with cols[1]:
                     if st.button("✕", key=f"rm_{d['id']}"):
                         assign_device(d["id"], office_id())
@@ -314,15 +377,21 @@ else:
             if st.session_state.show_avail_tab3:
                 ls = iso_to_date(loc["start"])
                 le = iso_to_date(loc["end"])
-                can_add = [d for d in devices if available(d, ls, le) and loc["id"] not in d["location_ids"]]
+                can_add = [
+                    d for d in devices
+                    if d.get("location_ids")
+                    and available(d, ls, le)
+                    and loc["id"] not in d["location_ids"]
+                ]
 
                 st.subheader("Reservar otras gafas")
 
                 for d in can_add:
                     key = f"add_{d['id']}"
+                    subtitle = get_location_types_for_device(d, locations_map)
                     cols = st.columns([0.5, 9.5])
                     with cols[0]: st.checkbox("", key=key)
-                    with cols[1]: card(d["Name"])
+                    with cols[1]: card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
 
                 st.session_state.sel3 = [d["id"] for d in can_add if st.session_state.get(f"add_{d['id']}", False)]
 
