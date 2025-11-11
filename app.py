@@ -59,6 +59,25 @@ def assign_device(dev_id, loc_id):
         "properties": {"Location": {"relation": [{"id": loc_id}]}}
     }, headers=headers)
 
+def render_legend():
+    st.markdown(
+        """
+        <div style='margin-bottom:10px;'>
+            <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
+                         font-weight:bold;color:#fff;background:#4CAF50;border-radius:4px;margin-right:6px'>O</span>
+            Office: Las gafas se encuentran DISPONIBLES en oficina<br>
+            <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
+                         font-weight:bold;color:#fff;background:#FF9800;border-radius:4px;margin-right:6px'>C</span>
+            Client: Las gafas se RESERVADAS en oficina, asignadas a un proyecto en otras fechas.<br>
+            <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
+                         font-weight:bold;color:#fff;background:#1565C0;border-radius:4px;margin-right:6px'>H</span>
+            At Home: Las gafas se encuentran en casa de algún miembro del equipo.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
 # ---------------- LOAD MAP OF LOCATIONS ----------------
 @st.cache_data(show_spinner=False)
 def load_locations_map():
@@ -165,8 +184,7 @@ def card(name, location_types=None, selected=False):
       - Office: verde claro
       - In House: azul claro
       - Client: naranja claro
-    Seleccionado → gris, pero badge mantiene color.
-    Tooltip al hacer hover con explicación del tipo.
+    Seleccionado → gris, pero badge mantiene color
     """
     # Colores de fondo de card
     color_map_bg = {
@@ -186,26 +204,18 @@ def card(name, location_types=None, selected=False):
         "In House": "H",
         "Client": "C"
     }
-    # Mapear tooltip según tipo
-    tooltip_map = {
-        "Office": "Las gafas O se encuentran en la oficina.",
-        "In House": "Las gafas H se encuentran en casa de alguna persona del equipo.",
-        "Client": "Las gafas C se encuentran asignadas a un proyecto en este momento."
-    }
 
     # Fondo de la card
     bg = "#e0e0e0"
     badge_html = ""
-    tooltip_text = ""
     if location_types:
         first_type = location_types.split(" • ")[0]
         bg = color_map_bg.get(first_type, "#e0e0e0")
         badge_color = color_map_badge.get(first_type, "#9e9e9e")
         letter = badge_letter_map.get(first_type, "?")
-        tooltip_text = tooltip_map.get(first_type, "")
-        # Badge a la derecha del card, con tooltip
-        badge_html = f"<span title='{tooltip_text}' style='float:right;width:20px;height:20px;" \
-                     f"line-height:20px;text-align:center;font-weight:bold;color:#fff;background:{badge_color};" \
+        # Badge a la derecha del card
+        badge_html = f"<span style='float:right;width:20px;height:20px;line-height:20px;" \
+                     f"text-align:center;font-weight:bold;color:#fff;background:{badge_color};" \
                      f"border-radius:4px;margin-left:8px'>{letter}</span>"
 
     if selected:
@@ -284,6 +294,9 @@ locations_map = load_locations_map()
 # ---------------- TAB 1 ----------------
 if menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
+
+    with st.expander("📘 Leyenda de estados"):
+        render_legend()
     d1, d2 = st.columns(2)
     with d1: start = st.date_input("Fecha inicio", date.today())
     with d2: end = st.date_input("Fecha fin", date.today())
