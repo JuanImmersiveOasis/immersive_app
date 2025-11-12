@@ -68,7 +68,7 @@ def render_legend():
             Office: Las gafas se encuentran DISPONIBLES en oficina<br>
             <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
                          font-weight:bold;color:#fff;background:#FF9800;border-radius:4px;margin-right:6px'>C</span>
-            Client: Las gafas se RESERVADAS en oficina, asignadas a un proyecto en otras fechas.<br>
+            Client: Las gafas se encuentran RESERVADAS en oficina, asignadas a un proyecto en otras fechas.<br>
             <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
                          font-weight:bold;color:#fff;background:#1565C0;border-radius:4px;margin-right:6px'>H</span>
             At Home: Las gafas se encuentran en casa de algún miembro del equipo.
@@ -188,9 +188,9 @@ def card(name, location_types=None, selected=False):
     """
     # Colores de fondo de card
     color_map_bg = {
-        "Office": "#D5EAD6",    # verde claro
-        "In House": "#D2E9FC",  # azul claro
-        "Client": "#FFEAC9",    # naranja claro
+        "Office": "#D9E9DC",    # verde claro
+        "In House": "#E1EDF8",  # azul claro
+        "Client": "#F4ECDF",    # naranja claro
     }
     # Colores del badge
     color_map_badge = {
@@ -211,7 +211,7 @@ def card(name, location_types=None, selected=False):
     if location_types:
         first_type = location_types.split(" • ")[0]
         bg = color_map_bg.get(first_type, "#e0e0e0")
-        badge_color = color_map_badge.get(first_type, "#9e9e9e")
+        badge_color = color_map_badge.get(first_type, "#B3E5E6")
         letter = badge_letter_map.get(first_type, "?")
         # Badge a la derecha del card
         badge_html = f"<span style='float:right;width:20px;height:20px;line-height:20px;" \
@@ -219,7 +219,7 @@ def card(name, location_types=None, selected=False):
                      f"border-radius:4px;margin-left:8px'>{letter}</span>"
 
     if selected:
-        bg = "#BDBDBD"  # fondo gris si está seleccionado
+        bg = "#B3E5E6"  # fondo gris si está seleccionado
 
     st.markdown(
         f"""
