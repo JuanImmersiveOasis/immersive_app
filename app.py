@@ -352,89 +352,97 @@ elif menu == "Gafas para Equipo":
     st.title("Gafas para Equipo")
     with st.expander("📘 Leyenda de estados"):
         render_legend()
-    
-    # ==========================================================
-    # 1) Mostrar cards de locations In House con sus dispositivos
-    # ==========================================================
-    devices = load_devices()
-    inh = load_inhouse()
 
-    # Crear mapa persona/location → lista de dispositivos
+    # ==========================================================
+    # Inicialización de la copia local (solo 1 vez)
+    # ==========================================================
+    if "devices_live" not in st.session_state:
+        st.session_state.devices_live = load_devices()
+
+    devices = st.session_state.devices_live
+    inh = load_inhouse()
+    loc_map = load_locations_map()
+    oid = office_id()
+
+    # ==========================================================
+    # Mapa persona → dispositivos
+    # ==========================================================
     people_devices = {p["id"]: [] for p in inh}
 
     for dev in devices:
         for lid in dev["location_ids"]:
             if lid in people_devices:
-                people_devices[lid].append(dev["Name"])
+                people_devices[lid].append(dev)
 
-    # Filtrar solo locations con al menos 1 dispositivo
     people_with_devices = [
-        p for p in inh 
-        if len(people_devices[p["id"]]) > 0
+        p for p in inh if len(people_devices[p["id"]]) > 0
     ]
 
-    st.markdown("## 👥 Equipo con dispositivos")
+    st.markdown("## 👥 Equipo con dispositivos asignados")
 
-    # Render cards
+    # ==========================================================
+    # Expanders por persona, cada gafa con botón ✕
+    # ==========================================================
     for person in people_with_devices:
+        pid = person["id"]
         pname = person["name"]
-        dev_list = ", ".join(people_devices[person["id"]])
+        devs = people_devices[pid]
+        count = len(devs)
 
-        st.markdown(
-            f"""
-            <div style='padding:12px;margin-top:10px;margin-bottom:6px;
-                        background:#E1EDF8;border-radius:8px;
-                        box-shadow:0 2px 4px rgba(0,0,0,0.1);'>
-                <b>{pname}:</b> {dev_list}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        with st.expander(f"{pname} ({count})", expanded=False):
 
+            for d in devs:
+                cols = st.columns([9.2, 0.8])
+                with cols[0]:
+                    card(d["Name"], location_types="In House", selected=False)
+                with cols[1]:
+                    if st.button("✕", key=f"rm_{d['id']}"):
+                        # Notion
+                        assign_device(d["id"], oid)
+
+                        # Actualización local inmediata
+                        d["location_ids"] = [oid]
+
+                        # Redibujar interfaz instantáneamente
+                        st.rerun()
 
     st.markdown("---")
 
     # ==========================================================
-    # 2) BOTÓN TOGGLE PARA MOSTRAR/OCULTAR GAFAS DISPONIBLES
+    # Toggle mostrar/ocultar disponibles
     # ==========================================================
     label = "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_home") else "Mostrar otras gafas disponibles"
     if st.button(label, key="toggle_avail_home"):
         st.session_state.show_avail_home = not st.session_state.get("show_avail_home", False)
         st.rerun()
 
-
     # ==========================================================
-    # 3) Mostrar lista de gafas disponibles (en Office)
+    # Lista de disponibles (en oficina)
     # ==========================================================
     if st.session_state.get("show_avail_home", False):
 
         st.subheader("Otras gafas disponibles (en oficina)")
 
-        devices = load_devices()
-        oid = office_id()
         office_devices = [d for d in devices if oid in d["location_ids"]]
 
         for d in office_devices:
             key = f"o_{d['id']}"
-            subtitle = get_location_types_for_device(d, locations_map)
+            subtitle = get_location_types_for_device(d, loc_map)
             cols = st.columns([0.5, 9.5])
             with cols[0]:
                 st.checkbox("", key=key)
             with cols[1]:
                 card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
 
-        # Guardar selección
-        st.session_state.sel2 = [d["id"] for d in office_devices if st.session_state.get(f"o_{d['id']}", False)]
+        st.session_state.sel2 = [
+            d["id"] for d in office_devices if st.session_state.get(f"o_{d['id']}", False)
+        ]
         sel_count = len(st.session_state.sel2)
 
-        # ==========================================================
-        # 4) Sidebar para asignar las gafas seleccionadas a un miembro del equipo
-        #    -> al terminar se limpia caché, se resetea la selección y se rerunea
-        # ==========================================================
         with st.sidebar:
             counter_badge(sel_count, len(office_devices))
+
             if sel_count > 0:
-                inh = load_inhouse()
                 dest = st.selectbox("Asignar a:", [x["name"] for x in inh])
                 dest_id = next(x["id"] for x in inh if x["name"] == dest)
 
@@ -442,23 +450,26 @@ elif menu == "Gafas para Equipo":
                     progress_bar = st.progress(0)
                     status_text = st.empty()
 
-                    # Asignar cada dispositivo y actualizar progreso
                     for idx, did in enumerate(st.session_state.sel2):
-                        device_name = next((d["Name"] for d in office_devices if d["id"] == did), "Dispositivo")
-                        status_text.text(f"📦 Moviendo {idx + 1}: {device_name}")
+
+                        # 1. Notion
                         assign_device(did, dest_id)
+
+                        # 2. Actualización LOCAL inmediata
+                        for d in devices:
+                            if d["id"] == did:
+                                d["location_ids"] = [dest_id]
+
+                        status_text.text(f"📦 Moviendo {idx + 1}")
                         progress_bar.progress((idx + 1) / sel_count)
 
                     status_text.empty()
-                    st.success("✅ Proceso completado")
+                    st.success("✅ Asignación completada")
 
-                    # ---- Actualización inmediata ----
-                    # Limpiamos caches, reseteamos selección y forzamos rerun
-                    clear_all_cache()
+                    # Reset selección
                     st.session_state.sel2 = []
-                    # Opcional: mantener el toggle abierto o cerrarlo. 
-                    # Si prefieres que se cierre automáticamente, descomenta la línea siguiente:
-                    # st.session_state.show_avail_home = False
+
+                    # UI actualizada inmediatamente
                     st.rerun()
 
 
