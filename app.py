@@ -349,51 +349,118 @@ if menu == "Disponibles para Alquilar":
 
 # ---------------- TAB 2 ----------------
 elif menu == "Gafas para Equipo":
-    st.title("Gafas en Casa del Equipo")
+    st.title("Gafas para Equipo")
     with st.expander("📘 Leyenda de estados"):
         render_legend()
-
+    
+    # ==========================================================
+    # 1) Mostrar cards de locations In House con sus dispositivos
+    # ==========================================================
     devices = load_devices()
     inh = load_inhouse()
 
-    st.markdown("## 👥 Equipo con gafas en casa")
-
-    # Crear mapa de persona → dispositivos asignados
+    # Crear mapa persona/location → lista de dispositivos
     people_devices = {p["id"]: [] for p in inh}
 
     for dev in devices:
         for lid in dev["location_ids"]:
             if lid in people_devices:
-                people_devices[lid].append(dev)
+                people_devices[lid].append(dev["Name"])
 
-    # Filtrar solo personas que tienen al menos 1 dispositivo
-    people_with_devices = [p for p in inh if len(people_devices[p["id"]]) > 0]
+    # Filtrar solo locations con al menos 1 dispositivo
+    people_with_devices = [
+        p for p in inh 
+        if len(people_devices[p["id"]]) > 0
+    ]
 
-    # Renderizar tarjetas de personas
+    st.markdown("## 👥 Equipo con dispositivos")
+
+    # Render cards
     for person in people_with_devices:
-        pid = person["id"]
         pname = person["name"]
-        devs = people_devices[pid]
+        dev_list = ", ".join(people_devices[person["id"]])
 
-        # Tarjeta de persona
-        st.markdown(f"""
-            <div style='padding:15px;margin-top:12px;margin-bottom:6px;
-                        background:#E1EDF8;border-radius:10px;box-shadow:0 2px 5px rgba(0,0,0,0.1);'>
-                
-                <div style='width:50px;height:50px;border-radius:8px;
-                            background:#1565C0;display:flex;align-items:center;
-                            justify-content:center;margin-bottom:8px;'>
-                    <span style='font-size:26px;color:white;'>👤</span>
-                </div>
-
-                <div style='font-size:18px;font-weight:bold;margin-bottom:8px;'>{pname}</div>
+        st.markdown(
+            f"""
+            <div style='padding:12px;margin-top:10px;margin-bottom:6px;
+                        background:#E1EDF8;border-radius:8px;
+                        box-shadow:0 2px 4px rgba(0,0,0,0.1);'>
+                <b>{pname}:</b> {dev_list}
             </div>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True
+        )
 
-        # Lista de dispositivos debajo
-        for d in devs:
+
+    st.markdown("---")
+
+    # ==========================================================
+    # 2) BOTÓN TOGGLE PARA MOSTRAR/OCULTAR GAFAS DISPONIBLES
+    # ==========================================================
+    label = "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_home") else "Mostrar otras gafas disponibles"
+    if st.button(label, key="toggle_avail_home"):
+        st.session_state.show_avail_home = not st.session_state.get("show_avail_home", False)
+        st.rerun()
+
+
+    # ==========================================================
+    # 3) Mostrar lista de gafas disponibles (en Office)
+    # ==========================================================
+    if st.session_state.get("show_avail_home", False):
+
+        st.subheader("Otras gafas disponibles (en oficina)")
+
+        devices = load_devices()
+        oid = office_id()
+        office_devices = [d for d in devices if oid in d["location_ids"]]
+
+        for d in office_devices:
+            key = f"o_{d['id']}"
             subtitle = get_location_types_for_device(d, locations_map)
-            card(d["Name"], location_types=subtitle)
+            cols = st.columns([0.5, 9.5])
+            with cols[0]:
+                st.checkbox("", key=key)
+            with cols[1]:
+                card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
+
+        # Guardar selección
+        st.session_state.sel2 = [d["id"] for d in office_devices if st.session_state.get(f"o_{d['id']}", False)]
+        sel_count = len(st.session_state.sel2)
+
+        # ==========================================================
+        # 4) Sidebar para asignar las gafas seleccionadas a un miembro del equipo
+        #    -> al terminar se limpia caché, se resetea la selección y se rerunea
+        # ==========================================================
+        with st.sidebar:
+            counter_badge(sel_count, len(office_devices))
+            if sel_count > 0:
+                inh = load_inhouse()
+                dest = st.selectbox("Asignar a:", [x["name"] for x in inh])
+                dest_id = next(x["id"] for x in inh if x["name"] == dest)
+
+                if st.button("Asignar seleccionadas"):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    # Asignar cada dispositivo y actualizar progreso
+                    for idx, did in enumerate(st.session_state.sel2):
+                        device_name = next((d["Name"] for d in office_devices if d["id"] == did), "Dispositivo")
+                        status_text.text(f"📦 Moviendo {idx + 1}: {device_name}")
+                        assign_device(did, dest_id)
+                        progress_bar.progress((idx + 1) / sel_count)
+
+                    status_text.empty()
+                    st.success("✅ Proceso completado")
+
+                    # ---- Actualización inmediata ----
+                    # Limpiamos caches, reseteamos selección y forzamos rerun
+                    clear_all_cache()
+                    st.session_state.sel2 = []
+                    # Opcional: mantener el toggle abierto o cerrarlo. 
+                    # Si prefieres que se cierre automáticamente, descomenta la línea siguiente:
+                    # st.session_state.show_avail_home = False
+                    st.rerun()
+
 
 # ---------------- TAB 3 ----------------
 else:
