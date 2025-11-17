@@ -349,43 +349,57 @@ if menu == "Disponibles para Alquilar":
 
 # ---------------- TAB 2 ----------------
 elif menu == "Gafas para Equipo":
-    st.title("Gafas para Equipo")
+    st.title("Gafas en Casa del Equipo")
+    with st.expander("📘 Leyenda de estados"):
+        render_legend()
+
     devices = load_devices()
-    oid = office_id()
-    office_devices = [d for d in devices if oid in d["location_ids"]]
+    inh = load_inhouse()
 
-    for d in office_devices:
-        key = f"o_{d['id']}"
-        subtitle = get_location_types_for_device(d, locations_map)
-        cols = st.columns([0.5, 9.5])
-        with cols[0]: st.checkbox("", key=key)
-        with cols[1]: card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
+    st.markdown("## 👥 Equipo con gafas en casa")
 
-    st.session_state.sel2 = [d["id"] for d in office_devices if st.session_state.get(f"o_{d['id']}", False)]
-    sel_count = len(st.session_state.sel2)
+    # Crear mapa de persona → dispositivos asignados
+    people_devices = {p["id"]: [] for p in inh}
 
-    with st.sidebar:
-        counter_badge(sel_count, len(office_devices))
-        if sel_count > 0:
-            inh = load_inhouse()
-            dest = st.selectbox("Asignar a:", [x["name"] for x in inh])
-            dest_id = next(x["id"] for x in inh if x["name"] == dest)
-            if st.button("Asignar seleccionadas"):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                for idx, did in enumerate(st.session_state.sel2):
-                    device_name = next((d["Name"] for d in office_devices if d["id"] == did), "Dispositivo")
-                    status_text.text(f"📦 Moviendo {idx + 1}: {device_name}")
-                    assign_device(did, dest_id)
-                    progress_bar.progress((idx + 1) / sel_count)
-                status_text.empty()
-                st.success("✅ Proceso completado")
-                clear_all_cache()
-                st.rerun()
+    for dev in devices:
+        for lid in dev["location_ids"]:
+            if lid in people_devices:
+                people_devices[lid].append(dev)
+
+    # Filtrar solo personas que tienen al menos 1 dispositivo
+    people_with_devices = [p for p in inh if len(people_devices[p["id"]]) > 0]
+
+    # Renderizar tarjetas de personas
+    for person in people_with_devices:
+        pid = person["id"]
+        pname = person["name"]
+        devs = people_devices[pid]
+
+        # Tarjeta de persona
+        st.markdown(f"""
+            <div style='padding:15px;margin-top:12px;margin-bottom:6px;
+                        background:#E1EDF8;border-radius:10px;box-shadow:0 2px 5px rgba(0,0,0,0.1);'>
+                
+                <div style='width:50px;height:50px;border-radius:8px;
+                            background:#1565C0;display:flex;align-items:center;
+                            justify-content:center;margin-bottom:8px;'>
+                    <span style='font-size:26px;color:white;'>👤</span>
+                </div>
+
+                <div style='font-size:18px;font-weight:bold;margin-bottom:8px;'>{pname}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # Lista de dispositivos debajo
+        for d in devs:
+            subtitle = get_location_types_for_device(d, locations_map)
+            card(d["Name"], location_types=subtitle)
 
 # ---------------- TAB 3 ----------------
 else:
     st.title("Próximos Envíos")
+    with st.expander("📘 Leyenda de estados"):
+        render_legend()
     locs = load_future_client_locations()
     options = ["Seleccionar..."] + [x["name"] for x in locs]
     sel = st.selectbox("Selecciona envío:", options)
