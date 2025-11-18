@@ -282,36 +282,45 @@ def get_location_types_for_device(dev, loc_map):
 
 # ---------------- SEGMENTED FILTER HELPER ----------------
 def segmented_tag_filter(devices, tag_field="Tags", groups=None, key_prefix="seg"):
-    """
-    devices: list of device dicts
-    tag_field: field name in device dict with the tag (by default "Tags")
-    groups: list of tags to show in ordered manner (if None, inferred)
-    key_prefix: unique prefix for the Streamlit widget key
-    Returns: filtered_devices, selected_group, counts_dict, options_map
-    """
-    # Normalize and infer groups if not provided
+    # Infer tags present
     present_tags = sorted({(d.get(tag_field) or "") for d in devices if d.get(tag_field)})
+
     if groups is None:
         groups = present_tags
 
+    # Build counts
     counts = {"Todas": len(devices)}
     for g in groups:
         counts[g] = sum(1 for d in devices if d.get(tag_field) == g)
 
+    # Build display options
     opciones = {f"Todas ({counts['Todas']})": "Todas"}
     for g in groups:
         opciones[f"{g} ({counts[g]})"] = g
 
-    # Use segmented_control without a label (clean)
-    sel_label = st.segmented_control(label=None, options=list(opciones.keys()), default=list(opciones.keys())[0], key=f"{key_prefix}_seg")
+    # --- SEGMENTED CONTROL ---
+    sel_label = st.segmented_control(
+        label=None,
+        options=list(opciones.keys()),
+        default=list(opciones.keys())[0],
+        key=f"{key_prefix}_seg"
+    )
+
+    # --- FIX 1: If stored key is invalid, reset to default ---
+    if sel_label not in opciones:
+        sel_label = list(opciones.keys())[0]  # fallback
+        st.session_state[f"{key_prefix}_seg"] = sel_label
+
     selected_group = opciones[sel_label]
 
+    # Filter devices
     if selected_group == "Todas":
         filtered = devices
     else:
         filtered = [d for d in devices if d.get(tag_field) == selected_group]
 
     return filtered, selected_group, counts, opciones
+
 
 # ---------------- STATE ----------------
 for key, default in [
@@ -405,80 +414,80 @@ if menu == "Disponibles para Alquilar":
 # ---------------- TAB 2 ----------------
 elif menu == "Gafas en casa":
 
+    # Título principal de la página
+    st.title("Gafas en casa")
+
+    # Cargar dispositivos (solo una vez)
     if "devices_live" not in st.session_state:
         st.session_state.devices_live = load_devices()
 
     devices = st.session_state.devices_live
     inh = load_inhouse()
     oid = office_id()
-
-    # ---- FILTRO GLOBAL PARA GAFAS EN CASA (IN-HOUSE) ----
-    inh_ids = [p["id"] for p in inh]
-    inhouse_devices = [d for d in devices if any(lid in inh_ids for lid in d["location_ids"])]
-
     groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
-    inhouse_filtered, _, inhouse_counts, inhouse_options = segmented_tag_filter(
-        inhouse_devices, groups=groups, key_prefix="inhouse"
-    )
-
-    # Reconstruir people_devices SOLO con filtered
-    people_devices = {p["id"]: [] for p in inh}
-    for d in inhouse_filtered:
-        for lid in d["location_ids"]:
-            if lid in people_devices:
-                people_devices[lid].append(d)
-
-    total_equipo = sum(len(people_devices[p["id"]]) for p in inh)
-
-    # Título con sumatorio
-    st.title(f"Total de dispositivos en casa ({total_equipo})")
 
     with st.expander("📘 Leyenda de estados"):
         render_legend()
 
-    people_with_devices = [p for p in inh if len(people_devices[p["id"]]) > 0]
+    # ==========================================================
+    # FILTRO GLOBAL: gafas en casa
+    # ==========================================================
+    inh_ids = [p["id"] for p in inh]
+    inhouse_devices = [d for d in devices if any(l in inh_ids for l in d["location_ids"])]
 
-    st.markdown("## Personal con dispositivos en casa")
+    # Aplicar filtro por tipo (directo dentro del expander)
+    # ==========================================================
+    # Expander principal: PERSONAL CON DISPOSITIVOS EN CASA
+    # ==========================================================
+    with st.expander("Personal con dispositivos en casa", expanded=True):
 
-    for person in people_with_devices:
-        pid = person["id"]
-        pname = person["name"]
-        devs = people_devices.get(pid, [])
+        inhouse_filtered, _, _, _ = segmented_tag_filter(
+            inhouse_devices, groups=groups, key_prefix="inhouse"
+        )
 
-        with st.expander(f"{pname} ({len(devs)})"):
+        # Reconstruir personas → dispositivos filtrados
+        people_devices = {p["id"]: [] for p in inh}
+        for d in inhouse_filtered:
+            for lid in d["location_ids"]:
+                if lid in people_devices:
+                    people_devices[lid].append(d)
 
-            for d in devs:
-                cols = st.columns([9.2, 0.8])
-                with cols[0]:
-                    card(d["Name"], location_types="In House")
-                with cols[1]:
-                    if st.button("✕", key=f"rm_{d['id']}"):
-                        assign_device(d["id"], oid)
-                        d["location_ids"] = [oid]
-                        st.rerun()
+        # Lista de personas con gafas filtradas
+        people_with_devices = [p for p in inh if len(people_devices[p["id"]]) > 0]
 
+        # Expanders por persona
+        for person in people_with_devices:
+            pid = person["id"]
+            pname = person["name"]
+            devs = people_devices.get(pid, [])
 
-    # Toggle mostrar/ocultar disponibles
-    if st.button(
-        "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_home") else "Mostrar otras gafas disponibles",
-        key="toggle_avail_home"
-    ):
-        st.session_state.show_avail_home = not st.session_state.get("show_avail_home")
-        st.rerun()
+            with st.expander(f"{pname} ({len(devs)})"):
+                for d in devs:
+                    cols = st.columns([9.2, 0.8])
+                    with cols[0]:
+                        card(d["Name"], location_types="In House")
+                    with cols[1]:
+                        if st.button("✕", key=f"rm_{d['id']}"):
+                            assign_device(d["id"], oid)
 
-    if st.session_state.get("show_avail_home", False):
+                            # REFRESCO COMPLETO
+                            clear_all_cache()
+                            st.session_state.devices_live = load_devices()
+                            st.rerun()
 
-        st.subheader("Otras gafas disponibles (en oficina)")
+    # ==========================================================
+    # EXPANDER: Otras gafas disponibles en oficina
+    # ==========================================================
 
-        # Dispositivos que realmente están en OFFICE
-        office_devices = [d for d in devices if oid in d["location_ids"]]
+    office_devices = [d for d in devices if oid in d["location_ids"]]
 
-        # Filtrado reutilizable
-        office_filtered, _, office_counts, office_options = segmented_tag_filter(
+    with st.expander("Otras gafas disponibles en oficina", expanded=False):
+
+        office_filtered, _, _, _ = segmented_tag_filter(
             office_devices, groups=groups, key_prefix="office"
         )
 
-        # Render del listado ya filtrado
+        # Render de lista filtrada
         for d in office_filtered:
             key = f"o_{d['id']}"
             subtitle = get_location_types_for_device(d, locations_map)
@@ -488,13 +497,13 @@ elif menu == "Gafas en casa":
             with cols[1]:
                 card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
 
-        # Actualizar selección
+        # Selección para asignar
         st.session_state.sel2 = [
             d["id"] for d in office_filtered if st.session_state.get(f"o_{d['id']}", False)
         ]
         sel_count = len(st.session_state.sel2)
 
-        # Contador en el sidebar
+        # Contador en sidebar
         with st.sidebar:
             counter_badge(sel_count, len(office_filtered))
 
@@ -505,6 +514,11 @@ elif menu == "Gafas en casa":
                 if st.button("Asignar seleccionadas"):
                     for did in st.session_state.sel2:
                         assign_device(did, dest_id)
+
+                    # REFRESCO COMPLETO
+                    clear_all_cache()
+                    st.session_state.devices_live = load_devices()
+
                     st.success("Asignación completada")
                     st.rerun()
 
