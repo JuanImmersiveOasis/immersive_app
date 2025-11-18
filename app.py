@@ -31,8 +31,14 @@ headers = {
 
 # ---------------- HELPERS ----------------
 
+def iso_to_date(s):
+    try:
+        return datetime.fromisoformat(s).date()
+    except:
+        return None
+
 def fmt(date_str):
-    """Formatea fechas a dd/mm/yyyy"""
+    """Formatea fechas a dd/mm/yyyy (si date_str es ISO)."""
     try:
         dt = iso_to_date(date_str)
         return dt.strftime("%d/%m/%Y")
@@ -40,6 +46,9 @@ def fmt(date_str):
         return date_str
 
 def q(db, payload=None):
+    """
+    Query a Notion database and return ALL results (handles pagination).
+    """
     if payload is None:
         payload = {"page_size": 200}
 
@@ -48,25 +57,29 @@ def q(db, payload=None):
     has_more = True
     next_cursor = None
 
-    while has_more:
+    # Make a shallow copy to avoid mutating caller's payload
+    p = dict(payload)
+
+    while True:
         if next_cursor:
-            payload["start_cursor"] = next_cursor
-
-        r = requests.post(url, json=payload, headers=headers).json()
-
-        results.extend(r.get("results", []))
-
-        has_more = r.get("has_more", False)
-        next_cursor = r.get("next_cursor", None)
-
+            p["start_cursor"] = next_cursor
+        r = requests.post(url, json=p, headers=headers)
+        if r.status_code != 200:
+            # Bubble up error in a helpful way
+            try:
+                st.error(f"Error fetching database {db}: {r.status_code}")
+                st.code(r.text)
+            except:
+                pass
+            return []
+        jr = r.json()
+        results.extend(jr.get("results", []))
+        if not jr.get("has_more", False):
+            break
+        next_cursor = jr.get("next_cursor", None)
+        if not next_cursor:
+            break
     return results
-
-
-def iso_to_date(s):
-    try:
-        return datetime.fromisoformat(s).date()
-    except:
-        return None
 
 def available(dev, start, end):
     ds = iso_to_date(dev.get("Start"))
@@ -137,11 +150,14 @@ def load_devices():
         props = p["properties"]
 
         name = props["Name"]["title"][0]["text"]["content"] if props["Name"]["title"] else "Sin nombre"
-        tag = props["Tags"]["select"]["name"] if props["Tags"]["select"] else None
-        locs = [r["id"] for r in props["Location"]["relation"]] if props["Location"]["relation"] else []
+        tag = props["Tags"]["select"]["name"] if props.get("Tags") and props["Tags"]["select"] else None
+        locs = [r["id"] for r in props["Location"]["relation"]] if props.get("Location") and props["Location"]["relation"] else []
 
-        # SN — CAMBIO NUEVO
-        sn = props["SN"]["rich_text"][0]["text"]["content"] if props["SN"]["rich_text"] else ""
+        # SN — CAMBIO: leer SN si existe
+        try:
+            sn = props["SN"]["rich_text"][0]["text"]["content"] if props.get("SN") and props["SN"]["rich_text"] else ""
+        except:
+            sn = ""
 
         # Rollups
         def roll(field):
@@ -158,7 +174,7 @@ def load_devices():
             "id": p["id"],
             "Name": name,
             "Tags": tag,
-            "SN": sn,         # ← NUEVO
+            "SN": sn,
             "location_ids": locs,
             "Start": roll("Start Date"),
             "End": roll("End Date")
@@ -179,11 +195,11 @@ def load_future_client_locations():
             t = None
         if t != "Client":
             continue
-        sd = props["Start Date"]["date"]["start"] if props["Start Date"]["date"] else None
+        sd = props["Start Date"]["date"]["start"] if props.get("Start Date") and props["Start Date"]["date"] else None
         if not sd or iso_to_date(sd) < today:
             continue
         name = props["Name"]["title"][0]["text"]["content"]
-        ed = props["End Date"]["date"]["start"] if props["End Date"]["date"] else None
+        ed = props["End Date"]["date"]["start"] if props.get("End Date") and props["End Date"]["date"] else None
         out.append({"id": p["id"], "name": name, "start": sd, "end": ed})
     return out
 
@@ -264,10 +280,43 @@ def get_location_types_for_device(dev, loc_map):
             uniq.append(t)
     return " • ".join(uniq) if uniq else None
 
+# ---------------- SEGMENTED FILTER HELPER ----------------
+def segmented_tag_filter(devices, tag_field="Tags", groups=None, key_prefix="seg"):
+    """
+    devices: list of device dicts
+    tag_field: field name in device dict with the tag (by default "Tags")
+    groups: list of tags to show in ordered manner (if None, inferred)
+    key_prefix: unique prefix for the Streamlit widget key
+    Returns: filtered_devices, selected_group, counts_dict, options_map
+    """
+    # Normalize and infer groups if not provided
+    present_tags = sorted({(d.get(tag_field) or "") for d in devices if d.get(tag_field)})
+    if groups is None:
+        groups = present_tags
+
+    counts = {"Todas": len(devices)}
+    for g in groups:
+        counts[g] = sum(1 for d in devices if d.get(tag_field) == g)
+
+    opciones = {f"Todas ({counts['Todas']})": "Todas"}
+    for g in groups:
+        opciones[f"{g} ({counts[g]})"] = g
+
+    # Use segmented_control without a label (clean)
+    sel_label = st.segmented_control(label=None, options=list(opciones.keys()), default=list(opciones.keys())[0], key=f"{key_prefix}_seg")
+    selected_group = opciones[sel_label]
+
+    if selected_group == "Todas":
+        filtered = devices
+    else:
+        filtered = [d for d in devices if d.get(tag_field) == selected_group]
+
+    return filtered, selected_group, counts, opciones
+
 # ---------------- STATE ----------------
 for key, default in [
     ("tab1_show", False), ("sel1", []), ("sel2", []),
-    ("sel3", []), ("tab3_loc", None), ("show_avail_tab3", False)
+    ("sel3", []), ("tab3_loc", None), ("show_avail_tab3", False), ("show_avail_home", False)
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -296,8 +345,10 @@ if menu == "Disponibles para Alquilar":
         render_legend()
 
     c1, c2 = st.columns(2)
-    with c1: start = st.date_input("Fecha inicio", date.today())
-    with c2: end = st.date_input("Fecha fin", date.today())
+    with c1:
+        start = st.date_input("Fecha inicio", date.today())
+    with c2:
+        end = st.date_input("Fecha fin", date.today())
 
     if st.button("Comprobar disponibilidad"):
         st.session_state.tab1_show = True
@@ -307,21 +358,27 @@ if menu == "Disponibles para Alquilar":
         devices = load_devices()
         avail = [d for d in devices if d.get("location_ids") and available(d, start, end)]
 
-        for d in avail:
+        # FILTRO POR TIPO (reutilizable)
+        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
+        avail_filtered, _, _, _ = segmented_tag_filter(avail, groups=groups, key_prefix="tab1")
+
+        for d in avail_filtered:
             key = f"a_{d['id']}"
             subtitle = get_location_types_for_device(d, locations_map)
             cols = st.columns([0.5, 9.5])
-            with cols[0]: st.checkbox("", key=key)
-            with cols[1]: card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
+            with cols[0]:
+                st.checkbox("", key=key)
+            with cols[1]:
+                card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
 
         st.session_state.sel1 = [
-            d["id"] for d in avail if st.session_state.get(f"a_{d['id']}", False)
+            d["id"] for d in avail_filtered if st.session_state.get(f"a_{d['id']}", False)
         ]
 
         sel_count = len(st.session_state.sel1)
 
         with st.sidebar:
-            counter_badge(sel_count, len(avail))
+            counter_badge(sel_count, len(avail_filtered))
             if sel_count > 0:
                 client = st.text_input("Nombre Cliente")
                 if st.button("Asignar Cliente"):
@@ -353,13 +410,23 @@ elif menu == "Gafas en casa":
 
     devices = st.session_state.devices_live
     inh = load_inhouse()
+    oid = office_id()
 
-    # ---- SUMATORIO TOTAL DE GAFAS EN CASA ----
+    # ---- FILTRO GLOBAL PARA GAFAS EN CASA (IN-HOUSE) ----
+    inh_ids = [p["id"] for p in inh]
+    inhouse_devices = [d for d in devices if any(lid in inh_ids for lid in d["location_ids"])]
+
+    groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
+    inhouse_filtered, _, inhouse_counts, inhouse_options = segmented_tag_filter(
+        inhouse_devices, groups=groups, key_prefix="inhouse"
+    )
+
+    # Reconstruir people_devices SOLO con filtered
     people_devices = {p["id"]: [] for p in inh}
-    for dev in devices:
-        for lid in dev["location_ids"]:
+    for d in inhouse_filtered:
+        for lid in d["location_ids"]:
             if lid in people_devices:
-                people_devices[lid].append(dev)
+                people_devices[lid].append(d)
 
     total_equipo = sum(len(people_devices[p["id"]]) for p in inh)
 
@@ -369,15 +436,6 @@ elif menu == "Gafas en casa":
     with st.expander("📘 Leyenda de estados"):
         render_legend()
 
-    oid = office_id()
-
-    # Agrupar por persona
-    people_devices = {p["id"]: [] for p in inh}
-    for dev in devices:
-        for lid in dev["location_ids"]:
-            if lid in people_devices:
-                people_devices[lid].append(dev)
-
     people_with_devices = [p for p in inh if len(people_devices[p["id"]]) > 0]
 
     st.markdown("## Personal con dispositivos en casa")
@@ -385,7 +443,7 @@ elif menu == "Gafas en casa":
     for person in people_with_devices:
         pid = person["id"]
         pname = person["name"]
-        devs = people_devices[pid]
+        devs = people_devices.get(pid, [])
 
         with st.expander(f"{pname} ({len(devs)})"):
 
@@ -400,6 +458,7 @@ elif menu == "Gafas en casa":
                         st.rerun()
 
 
+    # Toggle mostrar/ocultar disponibles
     if st.button(
         "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_home") else "Mostrar otras gafas disponibles",
         key="toggle_avail_home"
@@ -414,45 +473,12 @@ elif menu == "Gafas en casa":
         # Dispositivos que realmente están en OFFICE
         office_devices = [d for d in devices if oid in d["location_ids"]]
 
-        # ---- FILTRO POR TIPO (SEGMENTED CONTROL) ----
-
-        # Contar por tipo
-        count_total  = len(office_devices)
-        count_ultra  = sum(1 for d in office_devices if d["Tags"] == "Ultra")
-        count_neo4   = sum(1 for d in office_devices if d["Tags"] == "Neo 4")
-        count_quest2 = sum(1 for d in office_devices if d["Tags"] == "Quest 2")
-        count_quest3 = sum(1 for d in office_devices if d["Tags"] == "Quest 3")
-
-        # Opciones mostradas en el segmented control
-        opciones = {
-            f"Todas ({count_total})":  "Todas",
-            f"Ultra ({count_ultra})":  "Ultra",
-            f"Neo 4 ({count_neo4})":   "Neo 4",
-            f"Quest 2 ({count_quest2})": "Quest 2",
-            f"Quest 3 ({count_quest3})": "Quest 3"
-        }
-
-        tipo_sel = st.segmented_control(
-            label=None,
-            options=list(opciones.keys()),
-            default=list(opciones.keys())[0]
+        # Filtrado reutilizable
+        office_filtered, _, office_counts, office_options = segmented_tag_filter(
+            office_devices, groups=groups, key_prefix="office"
         )
 
-        # ---- APLICAR FILTRO ----
-        filtro = opciones[tipo_sel]
-
-        if filtro == "Ultra":
-            office_filtered = [d for d in office_devices if d["Tags"] == "Ultra"]
-        elif filtro == "Neo 4":
-            office_filtered = [d for d in office_devices if d["Tags"] == "Neo 4"]
-        elif filtro == "Quest 2":
-            office_filtered = [d for d in office_devices if d["Tags"] == "Quest 2"]
-        elif filtro == "Quest 3":
-            office_filtered = [d for d in office_devices if d["Tags"] == "Quest 3"]
-        else:
-            office_filtered = office_devices
-
-        # ---- RENDER DEL LISTADO (YA FILTRADO) ----
+        # Render del listado ya filtrado
         for d in office_filtered:
             key = f"o_{d['id']}"
             subtitle = get_location_types_for_device(d, locations_map)
@@ -462,13 +488,13 @@ elif menu == "Gafas en casa":
             with cols[1]:
                 card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
 
-        # ---- ACTUALIZAR SELECCIÓN ----
+        # Actualizar selección
         st.session_state.sel2 = [
             d["id"] for d in office_filtered if st.session_state.get(f"o_{d['id']}", False)
         ]
         sel_count = len(st.session_state.sel2)
 
-        # ---- CONTADOR EN EL SIDEBAR ----
+        # Contador en el sidebar
         with st.sidebar:
             counter_badge(sel_count, len(office_filtered))
 
@@ -479,18 +505,96 @@ elif menu == "Gafas en casa":
                 if st.button("Asignar seleccionadas"):
                     for did in st.session_state.sel2:
                         assign_device(did, dest_id)
-                        for d in devices:
-                            if d["id"] == did:
-                                d["location_ids"] = [dest_id]
-
                     st.success("Asignación completada")
-                    st.session_state.sel2 = []
                     st.rerun()
 
+# ---------------- TAB 3 ----------------
+elif menu == "Próximos Envíos":
+    st.title("Próximos Envíos")
+
+    with st.expander("📘 Leyenda de estados"):
+        render_legend()
+    locs = load_future_client_locations()
+    options = ["Seleccionar..."] + [x["name"] for x in locs]
+    sel = st.selectbox("Selecciona envío:", options)
+
+    if sel != "Seleccionar...":
+        loc = next(x for x in locs if x["name"] == sel)
+        st.session_state.tab3_loc = loc["id"]
+
+        st.write(f"📅 Inicio: **{fmt(loc['start'])}** — Fin: **{fmt(loc['end'])}**")
+
+        devices = load_devices()
+        assigned = [d for d in devices if loc["id"] in d["location_ids"]]
+
+        # FILTRO assigned
+        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
+        assigned_filtered, _, assigned_counts, assigned_options = segmented_tag_filter(
+            assigned, groups=groups, key_prefix="tab3_assigned"
+        )
+
+        with st.expander(f"📦 Gafas reservadas ({len(assigned_filtered)})", expanded=False):
+            for d in assigned_filtered:
+                cols = st.columns([9, 1])
+                with cols[0]:
+                    subtitle = get_location_types_for_device(d, locations_map)
+                    card(d["Name"], location_types=subtitle)
+                with cols[1]:
+                    if st.button("✕", key=f"rm_{d['id']}"):
+                        assign_device(d["id"], office_id())
+                        clear_all_cache()
+                        st.rerun()
+
+            # Mostrar disponibles para añadir
+            if st.button(
+                "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_tab3") else "Mostrar otras gafas disponibles",
+                key="toggle_avail_tab3"
+            ):
+                st.session_state.show_avail_tab3 = not st.session_state.get("show_avail_tab3")
+                st.rerun()
+
+            if st.session_state.show_avail_tab3:
+                ls = iso_to_date(loc["start"])
+                le = iso_to_date(loc["end"])
+                can_add = [
+                    d for d in devices
+                    if d.get("location_ids")
+                    and available(d, ls, le)
+                    and loc["id"] not in d["location_ids"]
+                ]
+
+                # FILTRO can_add
+                can_add_filtered, _, canadd_counts, canadd_options = segmented_tag_filter(
+                    can_add, groups=groups, key_prefix="tab3_canadd"
+                )
+
+                st.subheader("Reservar otras gafas")
+
+                for d in can_add_filtered:
+                    key = f"add_{d['id']}"
+                    subtitle = get_location_types_for_device(d, locations_map)
+                    cols = st.columns([0.5, 9.5])
+                    with cols[0]:
+                        st.checkbox("", key=key)
+                    with cols[1]:
+                        card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
+
+                st.session_state.sel3 = [d["id"] for d in can_add_filtered if st.session_state.get(f"add_{d['id']}", False)]
+
+                if len(st.session_state.sel3) > 0:
+                    if st.button("➕ Añadir seleccionadas"):
+                        for did in st.session_state.sel3:
+                            assign_device(did, loc["id"])
+                        st.success("✅ Añadidas correctamente")
+                        clear_all_cache()
+                        st.rerun()
 
 # ---------------- TAB 4 — CHECK-IN ----------------
 else:
     st.title("Check-In de Gafas (de vuelta a oficina)")
+
+    with st.expander("📘 Leyenda de estados"):
+        render_legend()
 
     today = date.today()
     all_locs = q(LOCATIONS_ID)
@@ -500,10 +604,10 @@ else:
     for p in all_locs:
         props = p["properties"]
 
-        if not props["Type"]["select"] or props["Type"]["select"]["name"] != "Client":
+        if not props.get("Type") or not props["Type"].get("select") or props["Type"]["select"]["name"] != "Client":
             continue
 
-        ed = props["End Date"]["date"]["start"] if props["End Date"]["date"] else None
+        ed = props.get("End Date")["date"]["start"] if props.get("End Date") and props["End Date"].get("date") else None
         if not ed or iso_to_date(ed) >= today:
             continue
 
@@ -522,10 +626,7 @@ else:
         st.info("No hay envíos finalizados con dispositivos.")
         st.stop()
 
-    options = ["Seleccionar..."] + [
-        f"{x['name']} (fin {fmt(x['end'])})" for x in finished
-    ]
-
+    options = ["Seleccionar..."] + [f"{x['name']} (fin {fmt(x['end'])})" for x in finished]
     sel = st.selectbox("Selecciona envío terminado:", options)
 
     if sel != "Seleccionar...":
@@ -551,31 +652,29 @@ else:
                             "parent": {"database_id": HISTORIC_ID},
                             "properties": {
                                 "Name": {"title": [{"text": {"content": d['Name']}}]},
-                                "Tags": {"select": {"name": d["Tags"]}} if d["Tags"] else None,
+                                # Only include if not None
+                                "Tags": {"select": {"name": d["Tags"]}} if d.get("Tags") else None,
                                 "SN": {"rich_text": [{"text": {"content": d.get("SN", "")}}]},
                                 "Location": {"relation": [{"id": loc["id"]}]},
-                                "Start Date": {"date": {"start": d["Start"]}} if d["Start"] else None,
-                                "End Date": {"date": {"start": d["End"]}} if d["End"] else None,
+                                "Start Date": {"date": {"start": d["Start"]}} if d.get("Start") else None,
+                                "End Date": {"date": {"start": d["End"]}} if d.get("End") else None,
                                 "Check In": {"date": {"start": date.today().isoformat()}}
                             }
                         }
 
-                        payload["properties"] = {k:v for k,v in payload["properties"].items() if v}
+                        # Remove None props
+                        payload["properties"] = {k: v for k, v in payload["properties"].items() if v is not None}
 
-                        r = requests.post(
-                            "https://api.notion.com/v1/pages",
-                            headers=headers,
-                            json=payload
-                        )
+                        r = requests.post("https://api.notion.com/v1/pages", headers=headers, json=payload)
 
                         if r.status_code != 200:
-                            st.error("❌ Error al registrar en histórico")
+                            st.error(f"❌ Error al registrar en histórico ({r.status_code})")
                             st.code(r.text)
-                            st.stop()
+                            # Do not continue to move device if historic failed
                         else:
                             st.success("Registro añadido correctamente")
-
-                        assign_device(d["id"], office)
-
-                        clear_all_cache()
-                        st.rerun()
+                            # Now move device to office
+                            assign_device(d["id"], office)
+                            # refresh caches and UI
+                            clear_all_cache()
+                            st.rerun()
