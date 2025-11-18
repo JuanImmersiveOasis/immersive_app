@@ -276,7 +276,7 @@ for key, default in [
 with st.sidebar:
     menu = st.radio("Navegación", [
         "Disponibles para Alquilar",
-        "Gafas para Equipo",
+        "Gafas en casa",
         "Próximos Envíos",
         "Check-In"
     ])
@@ -346,17 +346,29 @@ if menu == "Disponibles para Alquilar":
                     st.rerun()
 
 # ---------------- TAB 2 ----------------
-elif menu == "Gafas para Equipo":
-    st.title("Gafas para Equipo")
-
-    with st.expander("📘 Leyenda de estados"):
-        render_legend()
+elif menu == "Gafas en casa":
 
     if "devices_live" not in st.session_state:
         st.session_state.devices_live = load_devices()
 
     devices = st.session_state.devices_live
     inh = load_inhouse()
+
+    # ---- SUMATORIO TOTAL DE GAFAS EN CASA ----
+    people_devices = {p["id"]: [] for p in inh}
+    for dev in devices:
+        for lid in dev["location_ids"]:
+            if lid in people_devices:
+                people_devices[lid].append(dev)
+
+    total_equipo = sum(len(people_devices[p["id"]]) for p in inh)
+
+    # Título con sumatorio
+    st.title(f"Total de dispositivos en casa ({total_equipo})")
+
+    with st.expander("📘 Leyenda de estados"):
+        render_legend()
+
     oid = office_id()
 
     # Agrupar por persona
@@ -387,7 +399,6 @@ elif menu == "Gafas para Equipo":
                         d["location_ids"] = [oid]
                         st.rerun()
 
-    st.markdown("---")
 
     if st.button(
         "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_home") else "Mostrar otras gafas disponibles",
@@ -397,25 +408,69 @@ elif menu == "Gafas para Equipo":
         st.rerun()
 
     if st.session_state.get("show_avail_home", False):
+
         st.subheader("Otras gafas disponibles (en oficina)")
 
+        # Dispositivos que realmente están en OFFICE
         office_devices = [d for d in devices if oid in d["location_ids"]]
 
-        for d in office_devices:
+        # ---- FILTRO POR TIPO (SEGMENTED CONTROL) ----
+
+        # Contar por tipo
+        count_total  = len(office_devices)
+        count_ultra  = sum(1 for d in office_devices if d["Tags"] == "Ultra")
+        count_neo4   = sum(1 for d in office_devices if d["Tags"] == "Neo 4")
+        count_quest2 = sum(1 for d in office_devices if d["Tags"] == "Quest 2")
+        count_quest3 = sum(1 for d in office_devices if d["Tags"] == "Quest 3")
+
+        # Opciones mostradas en el segmented control
+        opciones = {
+            f"Todas ({count_total})":  "Todas",
+            f"Ultra ({count_ultra})":  "Ultra",
+            f"Neo 4 ({count_neo4})":   "Neo 4",
+            f"Quest 2 ({count_quest2})": "Quest 2",
+            f"Quest 3 ({count_quest3})": "Quest 3"
+        }
+
+        tipo_sel = st.segmented_control(
+            label=None,
+            options=list(opciones.keys()),
+            default=list(opciones.keys())[0]
+        )
+
+        # ---- APLICAR FILTRO ----
+        filtro = opciones[tipo_sel]
+
+        if filtro == "Ultra":
+            office_filtered = [d for d in office_devices if d["Tags"] == "Ultra"]
+        elif filtro == "Neo 4":
+            office_filtered = [d for d in office_devices if d["Tags"] == "Neo 4"]
+        elif filtro == "Quest 2":
+            office_filtered = [d for d in office_devices if d["Tags"] == "Quest 2"]
+        elif filtro == "Quest 3":
+            office_filtered = [d for d in office_devices if d["Tags"] == "Quest 3"]
+        else:
+            office_filtered = office_devices
+
+        # ---- RENDER DEL LISTADO (YA FILTRADO) ----
+        for d in office_filtered:
             key = f"o_{d['id']}"
             subtitle = get_location_types_for_device(d, locations_map)
             cols = st.columns([0.5, 9.5])
-            with cols[0]: st.checkbox("", key=key)
-            with cols[1]: card(d["Name"], location_types=subtitle)
+            with cols[0]:
+                st.checkbox("", key=key)
+            with cols[1]:
+                card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
 
+        # ---- ACTUALIZAR SELECCIÓN ----
         st.session_state.sel2 = [
-            d["id"] for d in office_devices if st.session_state.get(f"o_{d['id']}", False)
+            d["id"] for d in office_filtered if st.session_state.get(f"o_{d['id']}", False)
         ]
-
         sel_count = len(st.session_state.sel2)
 
+        # ---- CONTADOR EN EL SIDEBAR ----
         with st.sidebar:
-            counter_badge(sel_count, len(office_devices))
+            counter_badge(sel_count, len(office_filtered))
 
             if sel_count > 0:
                 dest = st.selectbox("Asignar a:", [x["name"] for x in inh])
@@ -432,76 +487,6 @@ elif menu == "Gafas para Equipo":
                     st.session_state.sel2 = []
                     st.rerun()
 
-# ---------------- TAB 3 ----------------
-elif menu == "Próximos Envíos":
-    st.title("Próximos Envíos")
-
-    with st.expander("📘 Leyenda de estados"):
-        render_legend()
-
-    locs = load_future_client_locations()
-    options = ["Seleccionar..."] + [x["name"] for x in locs]
-    sel = st.selectbox("Selecciona envío:", options)
-
-    if sel != "Seleccionar...":
-        loc = next(x for x in locs if x["name"] == sel)
-
-        st.write(f"📅 Inicio: **{fmt(loc['start'])}** — Fin: **{fmt(loc['end'])}**")
-
-        devices = load_devices()
-        assigned = [d for d in devices if loc["id"] in d["location_ids"]]
-
-        with st.expander(f"📦 Gafas reservadas ({len(assigned)})"):
-
-            for d in assigned:
-                cols = st.columns([9, 1])
-                with cols[0]:
-                    subtitle = get_location_types_for_device(d, locations_map)
-                    card(d["Name"], location_types=subtitle)
-                with cols[1]:
-                    if st.button("✕", key=f"rm_{d['id']}"):
-                        assign_device(d["id"], office_id())
-                        clear_all_cache()
-                        st.rerun()
-
-            if st.button(
-                "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_tab3") else "Mostrar otras gafas disponibles",
-                key="toggle_avail_tab3"
-            ):
-                st.session_state.show_avail_tab3 = not st.session_state.get("show_avail_tab3")
-                st.rerun()
-
-            if st.session_state.show_avail_tab3:
-                ls = iso_to_date(loc["start"])
-                le = iso_to_date(loc["end"])
-
-                can_add = [
-                    d for d in devices
-                    if d.get("location_ids")
-                    and available(d, ls, le)
-                    and loc["id"] not in d["location_ids"]
-                ]
-
-                st.subheader("Reservar otras gafas")
-
-                for d in can_add:
-                    key = f"add_{d['id']}"
-                    subtitle = get_location_types_for_device(d, locations_map)
-                    cols = st.columns([0.5, 9.5])
-                    with cols[0]: st.checkbox("", key=key)
-                    with cols[1]: card(d["Name"], location_types=subtitle)
-
-                st.session_state.sel3 = [
-                    d["id"] for d in can_add if st.session_state.get(f"add_{d['id']}", False)
-                ]
-
-                if len(st.session_state.sel3) > 0:
-                    if st.button("➕ Añadir seleccionadas"):
-                        for did in st.session_state.sel3:
-                            assign_device(did, loc["id"])
-                        st.success("Añadidas correctamente")
-                        clear_all_cache()
-                        st.rerun()
 
 # ---------------- TAB 4 — CHECK-IN ----------------
 else:
