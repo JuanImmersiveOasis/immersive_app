@@ -42,8 +42,25 @@ def fmt(date_str):
 def q(db, payload=None):
     if payload is None:
         payload = {"page_size": 200}
-    r = requests.post(f"https://api.notion.com/v1/databases/{db}/query", json=payload, headers=headers)
-    return r.json().get("results", [])
+
+    url = f"https://api.notion.com/v1/databases/{db}/query"
+    results = []
+    has_more = True
+    next_cursor = None
+
+    while has_more:
+        if next_cursor:
+            payload["start_cursor"] = next_cursor
+
+        r = requests.post(url, json=payload, headers=headers).json()
+
+        results.extend(r.get("results", []))
+
+        has_more = r.get("has_more", False)
+        next_cursor = r.get("next_cursor", None)
+
+    return results
+
 
 def iso_to_date(s):
     try:
