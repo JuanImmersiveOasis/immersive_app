@@ -267,7 +267,7 @@ for key, default in [("tab1_show", False), ("sel1", []), ("sel2", []), ("sel3", 
 
 # ---------------- SIDEBAR NAV ----------------
 with st.sidebar:
-    menu = st.radio("Navegación", ["Disponibles para Alquilar", "Gafas para Equipo", "Próximos Envíos"])
+    menu = st.radio("Navegación", ["Disponibles para Alquilar", "Gafas para Equipo", "Próximos Envíos", "Recepcion"])
     st.markdown("----")
 
     st.markdown("""
@@ -474,7 +474,7 @@ elif menu == "Gafas para Equipo":
 
 
 # ---------------- TAB 3 ----------------
-else:
+elif menu == "Próximos Envíos":
     st.title("Próximos Envíos")
     with st.expander("📘 Leyenda de estados"):
         render_legend()
@@ -540,3 +540,99 @@ else:
                         st.success("✅ Añadidas correctamente")
                         clear_all_cache()
                         st.rerun()
+
+# ---------------- TAB 4: CHECK-IN ----------------
+elif menu == "Recepcion":
+    st.title("Check-In de Gafas (de vuelta a oficina)")
+
+    with st.expander("📘 Leyenda de estados"):
+        render_legend()
+
+    today = date.today()
+    all_locs = q(LOCATIONS_ID)
+
+        # Filtrar locations tipo Client con End Date < hoy Y con dispositivos asociados
+    devices = load_devices()
+    finished = []
+
+    for p in all_locs:
+        props = p["properties"]
+
+        # 1) Debe ser tipo Client
+        if not props["Type"]["select"] or props["Type"]["select"]["name"] != "Client":
+            continue
+
+        # 2) Debe tener fecha fin pasada
+        ed = props["End Date"]["date"]["start"] if props["End Date"]["date"] else None
+        if not ed or iso_to_date(ed) >= today:
+            continue
+
+        loc_id = p["id"]
+
+        # 3) Debe tener al menos un dispositivo asociado
+        assigned = [d for d in devices if loc_id in d["location_ids"]]
+        if len(assigned) == 0:
+            continue
+
+        # Si pasa todo, añadir
+        finished.append({
+            "id": loc_id,
+            "name": props["Name"]["title"][0]["text"]["content"],
+            "end": ed
+        })
+
+
+    if not finished:
+        st.info("No hay envíos finalizados pendientes de check-in.")
+        st.stop()
+
+    options = ["Seleccionar..."] + [f"{x['name']} (fin {x['end']})" for x in finished]
+    sel = st.selectbox("Selecciona envío terminado:", options)
+
+    if sel != "Seleccionar...":
+
+        loc = finished[options.index(sel) - 1]
+        st.write(f"📅 Finalizó el **{loc['end']}**")
+
+        devices = load_devices()
+        assigned = [d for d in devices if loc["id"] in d["location_ids"]]
+        office = office_id()
+
+        with st.expander(f"📦 Gafas para recepcionar ({len(assigned)})", expanded=True):
+
+            for d in assigned:
+                cols = st.columns([9, 1])
+                with cols[0]:
+                    subtitle = get_location_types_for_device(d, locations_map)
+                    card(d["Name"], location_types=subtitle)
+
+                # Botón de recepción
+                with cols[1]:
+                    if st.button("📥", key=f"checkin_{d['id']}"):
+
+                        # 1) Insertar relación al histórico (igual que tu automatización)
+                        requests.post(
+                            "https://api.notion.com/v1/pages",
+                            headers=headers,
+                            json={
+                                "parent": {"database_id": "2a158a35e411806d9d11c6d77598d44d"},
+                                "properties": {
+                                    "Name": {"title": [{"text": {"content": d['Name']}}]},
+                                    "Tags": {"select": {"name": d["Tags"]}},
+                                    "SN": {"rich_text": [{"text": {"content": d.get("SN", "")}}]},
+                                    "Location": {"relation": [{"id": loc["id"]}]},
+                                    "Start Date": {"date": {"start": d["Start"]}},
+                                    "End Date": {"date": {"start": d["End"]}},
+                                    "Check In": {"date": {"start": date.today().isoformat()}}
+                                }
+                            }
+                        )
+
+                        # 2) Quitar relación con cliente y volver a Office
+                        assign_device(d["id"], office)
+
+                        # 3) Refrescar
+                        clear_all_cache()
+                        st.rerun()
+
+        st.success("Haz clic en 📥 para recepcionar cada gafa.")
