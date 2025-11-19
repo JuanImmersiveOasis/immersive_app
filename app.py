@@ -606,80 +606,115 @@ elif st.session_state.menu == "Próximos Envíos":
 
     with st.expander("📘 Leyenda de estados"):
         render_legend()
-    locs = load_future_client_locations()
-    options = ["Seleccionar..."] + [x["name"] for x in locs]
-    sel = st.selectbox("Selecciona envío:", options)
 
-    if sel != "Seleccionar...":
-        loc = next(x for x in locs if x["name"] == sel)
-        st.session_state.tab3_loc = loc["id"]
+    # =============================
+    # NIVEL 1 — Expanders de Envíos
+    # =============================
+    future_locs = load_future_client_locations()
 
-        st.write(f"📅 Inicio: **{fmt(loc['start'])}** — Fin: **{fmt(loc['end'])}**")
+    with st.expander(f"📦 Envíos futuros ({len(future_locs)})", expanded=True):
 
-        devices = load_devices()
-        assigned = [d for d in devices if loc["id"] in d["location_ids"]]
+        if len(future_locs) == 0:
+            st.info("No hay envíos futuros.")
+            st.stop()
 
-        # FILTRO assigned
-        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
-        assigned_filtered, _, assigned_counts, assigned_options = segmented_tag_filter(
-            assigned, groups=groups, key_prefix="tab3_assigned"
-        )
+        # Procesar cada envío futuro
+        for loc in future_locs:
 
-        with st.expander(f"📦 Gafas reservadas ({len(assigned_filtered)})", expanded=False):
-            for d in assigned_filtered:
-                cols = st.columns([9, 1])
-                with cols[0]:
-                    subtitle = get_location_types_for_device(d, locations_map)
-                    card(d["Name"], location_types=subtitle)
-                with cols[1]:
-                    if st.button("✕", key=f"rm_{d['id']}"):
-                        assign_device(d["id"], office_id())
-                        clear_all_cache()
-                        st.rerun()
+            lname = loc["name"]
+            start = fmt(loc["start"])
+            end = fmt(loc["end"])
+            loc_id = loc["id"]
 
-            # Mostrar disponibles para añadir
-            if st.button(
-                "Ocultar otras gafas disponibles" if st.session_state.get("show_avail_tab3") else "Mostrar otras gafas disponibles",
-                key="toggle_avail_tab3"
-            ):
-                st.session_state.show_avail_tab3 = not st.session_state.get("show_avail_tab3")
-                st.rerun()
+            devices = load_devices()
+            groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
 
-            if st.session_state.show_avail_tab3:
-                ls = iso_to_date(loc["start"])
-                le = iso_to_date(loc["end"])
-                can_add = [
-                    d for d in devices
-                    if d.get("location_ids")
-                    and available(d, ls, le)
-                    and loc["id"] not in d["location_ids"]
-                ]
+            # =============================
+            # NIVEL 2 — Expander por envío
+            # =============================
+            with st.expander(f"{lname} ({start} → {end})", expanded=False):
 
-                # FILTRO can_add
-                can_add_filtered, _, canadd_counts, canadd_options = segmented_tag_filter(
-                    can_add, groups=groups, key_prefix="tab3_canadd"
+                # ===================================
+                # A) Gafas asignadas a este envío
+                # ===================================
+                assigned = [d for d in devices if loc_id in d["location_ids"]]
+
+                st.subheader(f"📦 Gafas asignadas ")
+
+                assigned_filtered, _, _, _ = segmented_tag_filter(
+                    assigned, groups=groups, key_prefix=f"assigned_{loc_id}"
                 )
 
-                st.subheader("Reservar otras gafas")
+                
 
-                for d in can_add_filtered:
-                    key = f"add_{d['id']}"
-                    subtitle = get_location_types_for_device(d, locations_map)
-                    cols = st.columns([0.5, 9.5])
+                for d in assigned_filtered:
+                    cols = st.columns([9, 1])
                     with cols[0]:
-                        st.checkbox("", key=key)
+                        subtitle = get_location_types_for_device(d, locations_map)
+                        card(d["Name"], location_types=subtitle)
                     with cols[1]:
-                        card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
+                        if st.button("✕", key=f"rm_{loc_id}_{d['id']}"):
+                            assign_device(d["id"], office_id())
+                            clear_all_cache()
+                            st.rerun()
 
-                st.session_state.sel3 = [d["id"] for d in can_add_filtered if st.session_state.get(f"add_{d['id']}", False)]
+                # ===================================
+                # B) Expander de gafas disponibles
+                # ===================================
+                
+                with st.expander("Más gafas disponibles", expanded=False):
 
-                if len(st.session_state.sel3) > 0:
-                    if st.button("➕ Añadir seleccionadas"):
-                        for did in st.session_state.sel3:
-                            assign_device(did, loc["id"])
-                        st.success("✅ Añadidas correctamente")
-                        clear_all_cache()
-                        st.rerun()
+                    ls = iso_to_date(loc["start"])
+                    le = iso_to_date(loc["end"])
+
+                    can_add = [
+                        d for d in devices
+                        if d.get("location_ids")
+                        and available(d, ls, le)
+                        and loc_id not in d["location_ids"]
+                    ]
+
+
+                    can_add_filtered, _, _, _ = segmented_tag_filter(
+                        can_add, groups=groups, key_prefix=f"canadd_{loc_id}"
+                    )
+
+                    
+
+                    # Render checkboxes
+                    checkbox_keys = []
+                    for d in can_add_filtered:
+                        key = f"add_{loc_id}_{d['id']}"
+                        checkbox_keys.append(key)
+                        cols = st.columns([0.5, 9.5])
+                        with cols[0]:
+                            st.checkbox("", key=key)
+                        with cols[1]:
+                            subtitle = get_location_types_for_device(d, locations_map)
+                            card(d["Name"], location_types=subtitle, selected=st.session_state.get(key, False))
+
+                    # Obtener selección real
+                    selected_ids = [
+                        key.split("_")[-1]
+                        for key in checkbox_keys
+                        if st.session_state.get(key, False)
+                    ]
+
+                    sel_count = len(selected_ids)
+
+                    # ===================================
+                    # Sidebar — contador + botón
+                    # ===================================
+                    with st.sidebar:
+                        counter_badge(sel_count, len(can_add_filtered))
+
+                        if sel_count > 0:
+                            if st.button(f"Añadir a {lname}", key=f"assign_{loc_id}"):
+                                for did in selected_ids:
+                                    assign_device(did, loc_id)
+                                st.success("Añadidas correctamente")
+                                clear_all_cache()
+                                st.rerun()
 
 # ---------------- TAB 4 — CHECK-IN ----------------
 else:
