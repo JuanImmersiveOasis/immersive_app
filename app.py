@@ -331,23 +331,101 @@ for key, default in [
         st.session_state[key] = default
 
 # ---------------- SIDEBAR NAV ----------------
+# ===========================
+# SIDEBAR NATIVO SEGMENTED CONTROL
+# ===========================
 with st.sidebar:
-    menu = st.radio("Navegación", [
-        "Disponibles para Alquilar",
-        "Gafas en casa",
-        "Próximos Envíos",
+
+    # ---------- CONTADOR: Próximos envíos ----------
+    try:
+        num_proximos = len(load_future_client_locations())
+    except:
+        num_proximos = 0
+
+    # ---------- CONTADOR: Envíos finalizados (Check-In pendientes) ----------
+    today = date.today()
+    all_locs = q(LOCATIONS_ID)
+    devices_tmp = load_devices()
+
+    finished = []
+    for p in all_locs:
+        props = p["properties"]
+
+        if props.get("Type", {}).get("select", {}).get("name") != "Client":
+            continue
+
+        end_prop = props.get("End Date")
+        if isinstance(end_prop, dict):
+            date_obj = end_prop.get("date")
+            ed = date_obj.get("start") if isinstance(date_obj, dict) else None
+        else:
+            ed = None
+
+        if not ed or iso_to_date(ed) >= today:
+            continue
+
+        loc_id = p["id"]
+        assigned = [d for d in devices_tmp if loc_id in d["location_ids"]]
+        if len(assigned) == 0:
+            continue
+
+        finished.append(p)
+
+    num_finished = len(finished)
+
+    # =========================================================
+    # Construcción NATIVA de etiquetas para segmented_control
+    # =========================================================
+
+    label_disponibles = "Disponibles para Alquilar"
+    label_casa = "Gafas en casa"
+
+    # 🟠 Se muestran solo si > 0
+    label_proximos = (
+        "Próximos Envíos"
+        + ("  🟠" if num_proximos > 0 else "")     # ← Mostrar SOLO icono
+        # + (f"  🟠{num_proximos}" if num_proximos > 0 else "")   # ← Mostrar icono + número
+    )
+
+    # 🟠 Check-In (solo icono)
+    label_checkin = (
         "Check-In"
-    ])
+        + ("  🟠" if num_finished > 0 else "")    # ← Mostrar SOLO icono
+        # + (f"  🟠{num_finished}" if num_finished > 0 else "")   # ← Mostrar icono + número
+    )
+
+
+    opciones_segmented = {
+        label_disponibles: "Disponibles para Alquilar",
+        label_casa: "Gafas en casa",
+        label_proximos: "Próximos Envíos",
+        label_checkin: "Check-In"
+    }
+
+    # ---------- CONTROL DE NAVEGACIÓN ----------
+    menu_label = st.segmented_control(
+        "Navegación",
+        list(opciones_segmented.keys()),
+        default=list(opciones_segmented.keys())[0]
+    )
+
+    # Guarda la opción REAL en session_state
+    st.session_state.menu = opciones_segmented[menu_label]
+
     st.markdown("----")
 
-    if st.button("🔄 Refrescar", key="refresh_cache"):
+    # ---------- REFRESCAR ----------
+    if st.button("🔄 Refrescar"):
         clear_all_cache()
         st.rerun()
 
+
+# ---------- Cargar mapa de localizaciones DESPUÉS del sidebar ----------
 locations_map = load_locations_map()
 
+
 # ---------------- TAB 1 ----------------
-if menu == "Disponibles para Alquilar":
+if st.session_state.menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
 
     with st.expander("📘 Leyenda de estados"):
@@ -412,7 +490,7 @@ if menu == "Disponibles para Alquilar":
                     st.rerun()
 
 # ---------------- TAB 2 ----------------
-elif menu == "Gafas en casa":
+elif st.session_state.menu == "Gafas en casa":
 
     # Título principal de la página
     st.title("Gafas en casa")
@@ -523,7 +601,7 @@ elif menu == "Gafas en casa":
                     st.rerun()
 
 # ---------------- TAB 3 ----------------
-elif menu == "Próximos Envíos":
+elif st.session_state.menu == "Próximos Envíos":
     st.title("Próximos Envíos")
 
     with st.expander("📘 Leyenda de estados"):
