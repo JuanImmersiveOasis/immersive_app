@@ -399,8 +399,10 @@ with st.sidebar:
         label_disponibles: "Disponibles para Alquilar",
         label_casa: "Gafas en casa",
         label_proximos: "Próximos Envíos",
-        label_checkin: "Check-In"
+        label_checkin: "Check-In",
+        "Incidencias": "Incidencias"
     }
+
 
     # ---------- CONTROL DE NAVEGACIÓN ----------
     menu_label = st.segmented_control(
@@ -717,7 +719,7 @@ elif st.session_state.menu == "Próximos Envíos":
                                 st.rerun()
 
 # ---------------- TAB 4 — CHECK-IN ----------------
-else:
+elif st.session_state.menu == "Check-In":
     st.title("Check-In de Gafas (de vuelta a oficina)")
 
     with st.expander("📘 Leyenda de estados"):
@@ -805,3 +807,246 @@ else:
                             # refresh caches and UI
                             clear_all_cache()
                             st.rerun()
+
+# ---------------- TAB 5 — INCIDENCIAS ----------------
+elif st.session_state.menu == "Incidencias":
+
+    st.title("Incidencias de dispositivos")
+
+    ACTIVE_INC_ID = "28c58a35e41180b8ae87fb11aec1f48e"
+    PAST_INC_ID   = "28e58a35e41180f29199c42d33500566"
+
+    # ---- Loaders ----
+
+    @st.cache_data(show_spinner=False)
+    def load_active_incidents():
+        r = q(ACTIVE_INC_ID)
+        out = []
+        for p in r:
+            props = p["properties"]
+
+            try:
+                name = props["Name"]["title"][0]["text"]["content"]
+            except:
+                name = "Sin nombre"
+
+            # CAMPO REAL = "👓 Device"
+            dev = None
+            if "👓 Device" in props:
+                rel = props["👓 Device"].get("relation", [])
+                if rel:
+                    dev = rel[0]["id"]
+
+            created = props["Created Date"]["date"]["start"] if props.get("Created Date") else None
+
+            notes = ""
+            if props.get("Notes") and props["Notes"]["rich_text"]:
+                notes = props["Notes"]["rich_text"][0]["text"]["content"]
+
+            out.append({
+                "id": p["id"],
+                "Name": name,
+                "Device": dev,
+                "Created": created,
+                "Notes": notes
+            })
+
+        return out
+
+    @st.cache_data(show_spinner=False)
+    def load_past_incidents():
+        r = q(PAST_INC_ID)
+        out = []
+        for p in r:
+            props = p["properties"]
+
+            try:
+                name = props["Name"]["title"][0]["text"]["content"]
+            except:
+                name = "Sin nombre"
+
+            # CAMPO REAL = "👓 Device"
+            dev = None
+            if "👓 Device" in props:
+                rel = props["👓 Device"].get("relation", [])
+                if rel:
+                    dev = rel[0]["id"]
+
+            created = props["Created Date"]["date"]["start"] if props.get("Created Date") else None
+            resolved = props["Resolved Date"]["date"]["start"] if props.get("Resolved Date") else None
+
+            notes = ""
+            if props.get("Notes") and props["Notes"]["rich_text"]:
+                notes = props["Notes"]["rich_text"][0]["text"]["content"]
+
+            rnotes = ""
+            if props.get("Resolution Notes") and props["Resolution Notes"]["rich_text"]:
+                rnotes = props["Resolution Notes"]["rich_text"][0]["text"]["content"]
+
+            out.append({
+                "id": p["id"],
+                "Name": name,
+                "Device": dev,
+                "Created": created,
+                "Notes": notes,
+                "Resolved": resolved,
+                "ResolutionNotes": rnotes
+            })
+
+        return out
+
+    devices = load_devices()
+    actives = load_active_incidents()
+    pasts = load_past_incidents()
+
+    # Build device → incidents
+    device_map = {d["id"]: {"dev": d, "active": [], "past": []} for d in devices}
+
+    for a in actives:
+        if a["Device"] in device_map:
+            device_map[a["Device"]]["active"].append(a)
+
+    for p in pasts:
+        if p["Device"] in device_map:
+            device_map[p["Device"]]["past"].append(p)
+
+    # Devices with at least 1 incident
+    devices_with_inc = [
+        v for v in device_map.values()
+        if len(v["active"]) + len(v["past"]) > 0
+    ]
+
+    # ---------------- EXPANDER SUPERIOR ----------------
+    with st.expander("🔧 Gafas con incidencias", expanded=True):
+
+        for entry in devices_with_inc:
+
+            dev = entry["dev"]
+            active_list = entry["active"]
+            past_list = entry["past"]
+
+            active_count = len(active_list)
+            past_count   = len(past_list)
+            total = active_count + past_count
+
+            # ----- Badge incidencias -----
+            inc_html = ""
+            if total > 0:
+                bg = "#E53935" if active_count > 0 else "#9E9E9E"
+                inc_html = (
+                    f"<span style='display:inline-block;padding:2px 8px;"
+                    f"background:{bg};color:white;border-radius:6px;font-size:12px;"
+                    f"font-weight:bold;margin-left:8px;'>{active_count}/{past_count}</span>"
+                )
+
+            title_html = f"{dev['Name']} {inc_html}"
+
+            with st.expander(title_html, expanded=False):
+
+                # Ordenar
+                active_sorted = sorted(active_list, key=lambda x: x["Created"] or "", reverse=True)
+                past_sorted   = sorted(past_list,   key=lambda x: x["Created"] or "", reverse=True)
+
+                # ---- ACTIVAS ----
+                st.subheader(" Incidencias activas")
+
+                if len(active_sorted) == 0:
+                    st.info("No hay incidencias activas")
+                else:
+                    for inc in active_sorted:
+                        cols = st.columns([8, 2])
+                        with cols[0]:
+                            st.write(f"**{inc['🟥 Name']}** — {fmt(inc['Created'])}")
+                            if inc["Notes"]:
+                                st.caption(inc["Notes"])
+                        with cols[1]:
+                            if st.button("Resolver", key=f"solve_{inc['id']}"):
+                                st.session_state.solve_inc = inc
+
+                if len(past_sorted) == 0:
+                    st.info("No hay incidencias pasadas")
+                else:
+                    for inc in past_sorted:
+                        st.write(
+                            f"**{inc['⚪ Name']}** — {fmt(inc['Created'])} → {fmt(inc['Resolved'])}"
+                        )
+                        if inc["Notes"]:
+                            st.caption(inc["Notes"])
+
+    # ---------------- SIDEBAR: Resolver incidencia ----------------
+    if "solve_inc" in st.session_state and st.session_state.solve_inc:
+        inc = st.session_state.solve_inc
+
+        with st.sidebar:
+            st.markdown("### Resolver incidencia")
+
+            resolved_date = st.date_input("Fecha de resolución", value=date.today())
+            rnotes = st.text_area("Comentarios de resolución")
+
+            if st.button("Confirmar resolución"):
+
+                payload = {
+                    "parent": {"database_id": PAST_INC_ID},
+                    "properties": {
+                        "Name": {"title": [{"text": {"content": inc["Name"]}}]},
+                        "👓 Device": {"relation": [{"id": inc["Device"]}]},
+                        "Created Date": {"date": {"start": inc["Created"]}},
+                        "Notes": {"rich_text": [{"text": {"content": inc["Notes"]}}]},
+                        "Resolved Date": {"date": {"start": resolved_date.isoformat()}},
+                        "Resolution Notes": {"rich_text": [{"text": {"content": rnotes}}]},
+                    }
+                }
+
+                requests.post("https://api.notion.com/v1/pages", headers=headers, json=payload)
+
+                # Borrar la incidencia activa
+                requests.delete(f"https://api.notion.com/v1/blocks/{inc['id']}", headers=headers)
+
+                st.success("Incidencia resuelta")
+                st.session_state.solve_inc = None
+                clear_all_cache()
+                st.rerun()
+
+    # ---------------- EXPANDER: Añadir nueva incidencia ----------------
+    with st.expander("➕ Añadir nueva incidencia", expanded=False):
+
+        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
+        devices_filtered, _, _, _ = segmented_tag_filter(devices, groups=groups, key_prefix="new_inc")
+
+        sel_keys = []
+        for d in devices_filtered:
+            key = f"newinc_{d['id']}"
+            sel_keys.append(key)
+
+            cols = st.columns([0.5, 9.5])
+            with cols[0]:
+                st.checkbox("", key=key)
+            with cols[1]:
+                subtitle = get_location_types_for_device(d, locations_map)
+                card(d["Name"], location_types=subtitle)
+
+        selected = [dk.split("_")[1] for dk in sel_keys if st.session_state.get(dk, False)]
+
+        with st.sidebar:
+            if selected:
+                st.markdown("### Nueva incidencia")
+                name = st.text_input("Nombre incidencia")
+                notes = st.text_area("Notas")
+
+                if st.button("Crear incidencia"):
+                    for did in selected:
+                        payload = {
+                            "parent": {"database_id": ACTIVE_INC_ID},
+                            "properties": {
+                                "Name": {"title": [{"text": {"content": name}}]},
+                                "👓 Device": {"relation": [{"id": did}]},
+                                "Notes": {"rich_text": [{"text": {"content": notes}}]},
+                                "Created Date": {"date": {"start": date.today().isoformat()}}
+                            }
+                        }
+
+                        requests.post("https://api.notion.com/v1/pages", headers=headers, json=payload)
+
+                    st.success("Incidencia creada")
+                    clear_all_cache()
+                    st.rerun()
