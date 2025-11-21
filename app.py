@@ -830,10 +830,10 @@ elif st.session_state.menu == "Incidencias":
             except:
                 name = "Sin nombre"
 
-            # CAMPO REAL = "👓 Device"
+            # CAMPO REAL = "Device"
             dev = None
-            if "👓 Device" in props:
-                rel = props["👓 Device"].get("relation", [])
+            if "Device" in props:
+                rel = props["Device"].get("relation", [])
                 if rel:
                     dev = rel[0]["id"]
 
@@ -865,10 +865,10 @@ elif st.session_state.menu == "Incidencias":
             except:
                 name = "Sin nombre"
 
-            # CAMPO REAL = "👓 Device"
+            # CAMPO REAL = "Device"
             dev = None
-            if "👓 Device" in props:
-                rel = props["👓 Device"].get("relation", [])
+            if "Device" in props:
+                rel = props["Device"].get("relation", [])
                 if rel:
                     dev = rel[0]["id"]
 
@@ -948,7 +948,7 @@ elif st.session_state.menu == "Incidencias":
                 past_sorted   = sorted(past_list,   key=lambda x: x["Created"] or "", reverse=True)
 
                 # ---- ACTIVAS ----
-                st.subheader(" Incidencias activas")
+                st.subheader("🟥 Incidencias activas")
 
                 if len(active_sorted) == 0:
                     st.info("No hay incidencias activas")
@@ -956,19 +956,22 @@ elif st.session_state.menu == "Incidencias":
                     for inc in active_sorted:
                         cols = st.columns([8, 2])
                         with cols[0]:
-                            st.write(f"**{inc['🟥 Name']}** — {fmt(inc['Created'])}")
+                            st.write(f"**{inc['Name']}** — {fmt(inc['Created'])}")
                             if inc["Notes"]:
                                 st.caption(inc["Notes"])
                         with cols[1]:
                             if st.button("Resolver", key=f"solve_{inc['id']}"):
                                 st.session_state.solve_inc = inc
 
+                # ---- PASADAS ----
+                st.subheader("⚪ Incidencias resueltas")
+
                 if len(past_sorted) == 0:
                     st.info("No hay incidencias pasadas")
                 else:
                     for inc in past_sorted:
                         st.write(
-                            f"**{inc['⚪ Name']}** — {fmt(inc['Created'])} → {fmt(inc['Resolved'])}"
+                            f"**{inc['Name']}** — {fmt(inc['Created'])} → {fmt(inc['Resolved'])}"
                         )
                         if inc["Notes"]:
                             st.caption(inc["Notes"])
@@ -989,7 +992,7 @@ elif st.session_state.menu == "Incidencias":
                     "parent": {"database_id": PAST_INC_ID},
                     "properties": {
                         "Name": {"title": [{"text": {"content": inc["Name"]}}]},
-                        "👓 Device": {"relation": [{"id": inc["Device"]}]},
+                        "Device": {"relation": [{"id": inc["Device"]}]},
                         "Created Date": {"date": {"start": inc["Created"]}},
                         "Notes": {"rich_text": [{"text": {"content": inc["Notes"]}}]},
                         "Resolved Date": {"date": {"start": resolved_date.isoformat()}},
@@ -1039,7 +1042,7 @@ elif st.session_state.menu == "Incidencias":
                             "parent": {"database_id": ACTIVE_INC_ID},
                             "properties": {
                                 "Name": {"title": [{"text": {"content": name}}]},
-                                "👓 Device": {"relation": [{"id": did}]},
+                                "Device": {"relation": [{"id": did}]},
                                 "Notes": {"rich_text": [{"text": {"content": notes}}]},
                                 "Created Date": {"date": {"start": date.today().isoformat()}}
                             }
