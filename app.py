@@ -808,7 +808,8 @@ elif st.session_state.menu == "Check-In":
                             clear_all_cache()
                             st.rerun()
 
-# ---------------- TAB 5 — INCIDENCIAS ----------------
+# TAB 5 — INCIDENCIAS (versión completa con card simplificada)
+
 elif st.session_state.menu == "Incidencias":
 
     st.title("Incidencias de dispositivos")
@@ -817,7 +818,6 @@ elif st.session_state.menu == "Incidencias":
     PAST_INC_ID   = "28e58a35e41180f29199c42d33500566"
 
     # ---- Loaders ----
-
     @st.cache_data(show_spinner=False)
     def load_active_incidents():
         r = q(ACTIVE_INC_ID)
@@ -830,7 +830,6 @@ elif st.session_state.menu == "Incidencias":
             except:
                 name = "Sin nombre"
 
-            # CAMPO REAL = "Device"
             dev = None
             if "Device" in props:
                 rel = props["Device"].get("relation", [])
@@ -865,7 +864,6 @@ elif st.session_state.menu == "Incidencias":
             except:
                 name = "Sin nombre"
 
-            # CAMPO REAL = "Device"
             dev = None
             if "Device" in props:
                 rel = props["Device"].get("relation", [])
@@ -895,11 +893,60 @@ elif st.session_state.menu == "Incidencias":
 
         return out
 
+
+    # --------- NUEVA CARD DE INCIDENCIAS ---------
+    def incident_card(dev, active_list, past_list):
+        active_count = len(active_list)
+        past_count = len(past_list)
+        total = active_count + past_count
+
+        badge_bg = "#E53935" if active_count > 0 else "#9E9E9E"
+
+        st.markdown(
+            f"""
+            <div style=\"padding:12px;background:#F7F7F7;border-left:5px solid #9e9e9e;border-radius:8px;margin-bottom:10px;box-shadow:0 1px 2px rgba(0,0,0,0.08);\">
+                <div style=\"display:flex; align-items:center; justify-content:space-between;\">
+                    <strong style=\"font-size:16px;\">{dev['Name']}</strong>
+                    <span style=\"padding:2px 8px;background:{badge_bg};color:white;border-radius:6px;font-weight:bold;font-size:12px;\">{active_count}/{total}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # LISTA ÚNICA (activas en rojo, pasadas en gris)
+        combined = []
+        for inc in active_list:
+            combined.append({"color": "#E53935", "data": inc})
+        for inc in past_list:
+            combined.append({"color": "#9E9E9E", "data": inc})
+
+        combined_sorted = sorted(combined, key=lambda x: x["data"]["Created"] or "", reverse=True)
+
+        for item in combined_sorted:
+            inc = item["data"]
+            color = item["color"]
+
+            st.markdown(
+                f"""
+                <div style=\"margin-left:20px; margin-bottom:6px; display:flex; align-items:flex-start;\">
+                    <div style=\"width:10px;height:10px;background:{color};border-radius:50%;margin-top:6px;margin-right:8px;\"></div>
+                    <div>
+                        <strong>{inc['Name']}</strong>
+                        <span style=\"color:#888;\"> — {fmt(inc['Created'])}</span><br>
+                        <small style=\"color:#666;\">{inc['Notes']}</small>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+
+    # ---- Cargar datos ----
     devices = load_devices()
     actives = load_active_incidents()
     pasts = load_past_incidents()
 
-    # Build device → incidents
     device_map = {d["id"]: {"dev": d, "active": [], "past": []} for d in devices}
 
     for a in actives:
@@ -910,71 +957,14 @@ elif st.session_state.menu == "Incidencias":
         if p["Device"] in device_map:
             device_map[p["Device"]]["past"].append(p)
 
-    # Devices with at least 1 incident
-    devices_with_inc = [
-        v for v in device_map.values()
-        if len(v["active"]) + len(v["past"]) > 0
-    ]
+    devices_with_inc = [v for v in device_map.values() if len(v["active"]) + len(v["past"]) > 0]
 
-    # ---------------- EXPANDER SUPERIOR ----------------
-    with st.expander("🔧 Gafas con incidencias", expanded=True):
+    st.subheader("🔧 Gafas con incidencias")
 
-        for entry in devices_with_inc:
+    for entry in devices_with_inc:
+        incident_card(entry["dev"], entry["active"], entry["past"])
+        st.markdown("---")
 
-            dev = entry["dev"]
-            active_list = entry["active"]
-            past_list = entry["past"]
-
-            active_count = len(active_list)
-            past_count   = len(past_list)
-            total = active_count + past_count
-
-            # ----- Badge incidencias -----
-            inc_html = ""
-            if total > 0:
-                bg = "#E53935" if active_count > 0 else "#9E9E9E"
-                inc_html = (
-                    f"<span style='display:inline-block;padding:2px 8px;"
-                    f"background:{bg};color:white;border-radius:6px;font-size:12px;"
-                    f"font-weight:bold;margin-left:8px;'>{active_count}/{past_count}</span>"
-                )
-
-            title_html = f"{dev['Name']} {inc_html}"
-
-            with st.expander(title_html, expanded=False):
-
-                # Ordenar
-                active_sorted = sorted(active_list, key=lambda x: x["Created"] or "", reverse=True)
-                past_sorted   = sorted(past_list,   key=lambda x: x["Created"] or "", reverse=True)
-
-                # ---- ACTIVAS ----
-                st.subheader("🟥 Incidencias activas")
-
-                if len(active_sorted) == 0:
-                    st.info("No hay incidencias activas")
-                else:
-                    for inc in active_sorted:
-                        cols = st.columns([8, 2])
-                        with cols[0]:
-                            st.write(f"**{inc['Name']}** — {fmt(inc['Created'])}")
-                            if inc["Notes"]:
-                                st.caption(inc["Notes"])
-                        with cols[1]:
-                            if st.button("Resolver", key=f"solve_{inc['id']}"):
-                                st.session_state.solve_inc = inc
-
-                # ---- PASADAS ----
-                st.subheader("⚪ Incidencias resueltas")
-
-                if len(past_sorted) == 0:
-                    st.info("No hay incidencias pasadas")
-                else:
-                    for inc in past_sorted:
-                        st.write(
-                            f"**{inc['Name']}** — {fmt(inc['Created'])} → {fmt(inc['Resolved'])}"
-                        )
-                        if inc["Notes"]:
-                            st.caption(inc["Notes"])
 
     # ---------------- SIDEBAR: Resolver incidencia ----------------
     if "solve_inc" in st.session_state and st.session_state.solve_inc:
@@ -996,60 +986,23 @@ elif st.session_state.menu == "Incidencias":
                         "Created Date": {"date": {"start": inc["Created"]}},
                         "Notes": {"rich_text": [{"text": {"content": inc["Notes"]}}]},
                         "Resolved Date": {"date": {"start": resolved_date.isoformat()}},
-                        "Resolution Notes": {"rich_text": [{"text": {"content": rnotes}}]},
+                        "Resolution Notes": {"rich_text": [{"text": {"content": rnotes}}]}
                     }
                 }
 
                 requests.post("https://api.notion.com/v1/pages", headers=headers, json=payload)
-
-                # Borrar la incidencia activa
-                requests.delete(f"https://api.notion.com/v1/blocks/{inc['id']}", headers=headers)
+                requests.patch(f"https://api.notion.com/v1/pages/{inc['id']}", headers=headers, json={"archived": True})
 
                 st.success("Incidencia resuelta")
                 st.session_state.solve_inc = None
                 clear_all_cache()
                 st.rerun()
 
-    # ---------------- EXPANDER: Añadir nueva incidencia ----------------
+
+    # ---------------- AÑADIR NUEVA INCIDENCIA ----------------
     with st.expander("➕ Añadir nueva incidencia", expanded=False):
 
         groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
         devices_filtered, _, _, _ = segmented_tag_filter(devices, groups=groups, key_prefix="new_inc")
 
         sel_keys = []
-        for d in devices_filtered:
-            key = f"newinc_{d['id']}"
-            sel_keys.append(key)
-
-            cols = st.columns([0.5, 9.5])
-            with cols[0]:
-                st.checkbox("", key=key)
-            with cols[1]:
-                subtitle = get_location_types_for_device(d, locations_map)
-                card(d["Name"], location_types=subtitle)
-
-        selected = [dk.split("_")[1] for dk in sel_keys if st.session_state.get(dk, False)]
-
-        with st.sidebar:
-            if selected:
-                st.markdown("### Nueva incidencia")
-                name = st.text_input("Nombre incidencia")
-                notes = st.text_area("Notas")
-
-                if st.button("Crear incidencia"):
-                    for did in selected:
-                        payload = {
-                            "parent": {"database_id": ACTIVE_INC_ID},
-                            "properties": {
-                                "Name": {"title": [{"text": {"content": name}}]},
-                                "Device": {"relation": [{"id": did}]},
-                                "Notes": {"rich_text": [{"text": {"content": notes}}]},
-                                "Created Date": {"date": {"start": date.today().isoformat()}}
-                            }
-                        }
-
-                        requests.post("https://api.notion.com/v1/pages", headers=headers, json=payload)
-
-                    st.success("Incidencia creada")
-                    clear_all_cache()
-                    st.rerun()
