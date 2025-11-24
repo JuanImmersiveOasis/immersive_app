@@ -46,6 +46,14 @@ def fmt(date_str):
         return dt.strftime("%d/%m/%Y")
     except:
         return date_str
+    
+def fmt_datetime(date_str):
+    """Formatea fechas a dd/mm/yyyy HH:MM (si date_str es ISO con hora)."""
+    try:
+        dt = datetime.fromisoformat(date_str)
+        return dt.strftime("%d/%m/%Y %H:%M")
+    except:
+        return date_str if date_str else "Sin fecha"    
 
 def q(db, payload=None):
     """
@@ -910,7 +918,7 @@ elif st.session_state.menu == "Próximos Envíos":
                     if loc_id in d["location_ids"]
                 ]
 
-                st.subheader("📦 Gafas asignadas")
+                st.subheader("Dispositivos asignados")
 
                 assigned_filtered, _, _, _ = segmented_tag_filter(
                     assigned, groups=groups, key_prefix=f"assigned_{loc_id}"
@@ -1149,7 +1157,7 @@ elif st.session_state.menu == "Check-In":
                             st.rerun()
 
 
-# ---------------- TAB 5 — INCIDENCIAS ----------------
+# ---------------- TAB 5 – INCIDENCIAS ----------------
 elif st.session_state.menu == "Incidencias":
 
     st.title("Incidencias de dispositivos")
@@ -1181,10 +1189,13 @@ elif st.session_state.menu == "Incidencias":
         if len(entry["active"]) + len(entry["past"]) > 0
     ]
 
+    # Contar total de incidencias activas
+    total_active = sum(len(entry["active"]) for entry in devices_with_inc)
+
     # -------------------------
-    # EXPANDER SUPERIOR
+    # EXPANDER SUPERIOR con contador
     # -------------------------
-    with st.expander("🔧 Gafas con incidencias", expanded=True):
+    with st.expander(f"Gafas con incidencias ({total_active} activas)", expanded=True):
 
         if not devices_with_inc:
             st.info("No hay incidencias registradas.")
@@ -1207,43 +1218,105 @@ elif st.session_state.menu == "Incidencias":
                     incident_counts=(active_count, total_count)
                 )
 
-                # --- Listado indentado: activas + pasadas ---
-                combined = []
-
-                for inc in active_list:
-                    combined.append({"color": "#E53935", "data": inc})  # rojo
-
-                for inc in past_list:
-                    combined.append({"color": "#9E9E9E", "data": inc})  # gris
-
-                combined_sorted = sorted(
-                    combined,
-                    key=lambda x: x["data"].get("Created") or "",
+                # Ordenar activas y pasadas por separado
+                # Ordenar activas (más recientes primero)
+                active_sorted = sorted(
+                    active_list,
+                    key=lambda x: x.get("Created") or "",
                     reverse=True
                 )
 
-                for item in combined_sorted:
-                    inc = item["data"]
-                    col = item["color"]
+                # Ordenar pasadas (más recientes primero)
+                past_sorted = sorted(
+                    past_list,
+                    key=lambda x: x.get("Created") or "",
+                    reverse=True
+                )
 
-                    st.markdown(
-                        f"""
-                        <div style='margin-left:16px; margin-bottom:6px; display:flex;align-items:flex-start;'>
-                            <div style='width:10px;height:10px;background:{col};
-                                        border-radius:50%;margin-top:6px;margin-right:10px;'></div>
+                # ===========================
+                # INCIDENCIAS ACTIVAS
+                # ===========================
+                if active_sorted:
 
-                            <div>
-                                <strong style='font-size:14px;'>{inc['Name']}</strong>
-                                <span style='color:#888;'> — {fmt(inc.get('Created'))}</span><br>
-                                <small style='color:#666;'>{inc.get('Notes', '')}</small>
+                    for inc in active_sorted:
+                        notes = inc.get('Notes', '').replace('<', '&lt;').replace('>', '&gt;')
+                        created = fmt_datetime(inc.get('Created'))
+
+                        # Crear columnas para botón a la derecha
+                        cols = st.columns([9, 1])
+
+                        with cols[0]:
+                            st.markdown(
+                                f"""
+                                <div style='margin-left:20px; margin-bottom:10px; padding:8px;
+                                            background:#FFEBEE; border-left:3px solid #E53935;
+                                            border-radius:4px;'>
+                                    <div style='display:flex; align-items:center; margin-bottom:4px;'>
+                                        <div style='width:10px; height:10px; background:#E53935;
+                                                    border-radius:50%; margin-right:8px;'></div>
+                                        <strong style='font-size:14px; color:#333;'>{inc['Name']}</strong>
+                                        <span style='margin-left:8px; color:#888; font-size:12px;'>
+                                            {created}
+                                        </span>
+                                    </div>
+                                    <div style='margin-left:18px; color:#666; font-size:13px;'>
+                                        {notes if notes else '<em>Sin notas</em>'}
+                                    </div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                        # Botón resolver a la derecha
+                        with cols[1]:
+                            if st.button("Fix", key=f"resolve_{inc['id']}", help="Resolver incidencia"):
+                                st.session_state.solve_inc = inc
+                                st.rerun()
+
+               # ===========================
+                # INCIDENCIAS PASADAS
+                # ===========================
+                if past_sorted:
+
+                    for inc in past_sorted:
+                        notes = inc.get('Notes', '').replace('<', '&lt;').replace('>', '&gt;')
+                        created = fmt_datetime(inc.get('Created'))
+                        resolved = fmt_datetime(inc.get('Resolved'))
+                        
+                        # Obtener notas de resolución
+                        resolution_notes = inc.get('ResolutionNotes', '')
+                        
+                        # ✅ CAMBIO: Solo mostrar si hay contenido real
+                        if resolution_notes:
+                            resolution_notes = resolution_notes.replace('<', '&lt;').replace('>', '&gt;')
+                            resolution_html = f"<div style='margin-left:18px; color:#4CAF50; font-size:13px; margin-top:4px;'>{resolution_notes}</div>"
+                        else:
+                            resolution_html = ""
+
+                        st.markdown(
+                            f"""
+                            <div style='margin-left:20px; margin-bottom:10px; padding:8px;
+                                        background:#F5F5F5; border-left:3px solid #9E9E9E;
+                                        border-radius:4px;'>
+                                <div style='display:flex; align-items:center; margin-bottom:4px;'>
+                                    <div style='width:10px; height:10px; background:#9E9E9E;
+                                                border-radius:50%; margin-right:8px;'></div>
+                                    <strong style='font-size:14px; color:#555;'>{inc['Name']}</strong>
+                                    <span style='margin-left:8px; color:#888; font-size:12px;'>
+                                        Creada: {created} • Resuelta: {resolved}
+                                    </span>
+                                </div>
+                                <div style='margin-left:18px; color:#666; font-size:13px;'>
+                                    {notes if notes else '<em>Sin notas</em>'}
+                                </div>
+                                {resolution_html}
                             </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                            """,
+                            unsafe_allow_html=True
+                        )
 
-                # separación visual
-                st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+                # Separación visual entre dispositivos
+                st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
 
 
     # -------------------------
@@ -1252,56 +1325,99 @@ elif st.session_state.menu == "Incidencias":
     if "solve_inc" not in st.session_state:
         st.session_state.solve_inc = None
 
-    # Botones “resolver” dentro de la lista
-    for entry in devices_with_inc:
-        for inc in entry["active"]:
-            if st.button(f"Resolver: {inc['Name']}", key=f"solvebtn_{inc['id']}"):
-                st.session_state.solve_inc = inc
-
     if st.session_state.solve_inc:
 
         inc = st.session_state.solve_inc
 
         with st.sidebar:
             st.header("Resolver incidencia")
+            st.write(f"**{inc['Name']}**")
+            
+            # Mostrar información de la incidencia original
+            st.caption(f"Creada: {fmt_datetime(inc.get('Created'))}")
+            if inc.get('Notes'):
+                st.caption(f"Notas: {inc['Notes']}")
 
-            resolved_date = st.date_input(
-                "Fecha de resolución", value=date.today()
-            )
+            # Usar date_input Y time_input para fecha y hora
+            col_date, col_time = st.columns(2)
+            
+            with col_date:
+                resolved_date = st.date_input(
+                    "Fecha de resolución", 
+                    value=date.today()
+                )
+            
+            with col_time:
+                resolved_time = st.time_input(
+                    "Hora de resolución",
+                    value=datetime.now().time()
+                )
+            
             rnotes = st.text_area("Notas de resolución")
 
-            if st.button("Confirmar resolución"):
+            col1, col2 = st.columns(2)
 
-                payload = {
-                    "parent": {"database_id": PAST_INC_ID},
-                    "properties": {
-                        "Name": {"title": [{"text": {"content": inc["Name"]}}]},
-                        "Device": {"relation": [{"id": inc["Device"]}]},
-                        "Created Date": {"date": {"start": inc["Created"]}},
-                        "Notes": {"rich_text": [{"text": {"content": inc["Notes"]}}]},
-                        "Resolved Date": {"date": {"start": resolved_date.isoformat()}},
-                        "Resolution Notes": {"rich_text": [{"text": {"content": rnotes}}]},
-                    }
-                }
+            with col1:
+                if st.button("✅ Confirmar", use_container_width=True):
 
-                # Crear incidencia resuelta
-                requests.post(
-                    "https://api.notion.com/v1/pages",
-                    headers=headers,
-                    json=payload
-                )
+                    # Combinar fecha y hora
+                    resolved_datetime = datetime.combine(resolved_date, resolved_time)
+                    resolved_iso = resolved_datetime.isoformat()
 
-                # Archivar la incidencia activa original
-                requests.patch(
-                    f"https://api.notion.com/v1/pages/{inc['id']}",
-                    headers=headers,
-                    json={"archived": True}
-                )
+                    # Verificar que tenemos todos los datos necesarios
+                    if not inc.get("Device"):
+                        st.error("❌ Error: La incidencia no tiene dispositivo asociado")
+                    else:
+                        # Construir propiedades
+                        properties = {
+                            "Name": {"title": [{"text": {"content": inc["Name"]}}]},
+                            "Device": {"relation": [{"id": inc["Device"]}]},
+                            "Created Date": {"date": {"start": inc.get("Created", datetime.now().isoformat())}},
+                            "Notes": {"rich_text": [{"text": {"content": inc.get("Notes", "")}}]},
+                            "Resolved Date": {"date": {"start": resolved_iso}},
+                        }
+                        
+                        # Añadir notas de resolución si existen
+                        if rnotes:
+                            properties["Resolution Notes"] = {"rich_text": [{"text": {"content": rnotes}}]}
+                        
+                        # Crear payload
+                        payload = {
+                            "parent": {"database_id": PAST_INC_ID},
+                            "properties": properties
+                        }
 
-                st.success("Incidencia resuelta.")
-                st.session_state.solve_inc = None
-                clear_all_cache()
-                st.rerun()
+                        # Crear incidencia resuelta en PAST_INC_ID
+                        response_create = requests.post(
+                            "https://api.notion.com/v1/pages",
+                            headers=headers,
+                            json=payload
+                        )
+
+                        if response_create.status_code == 200:
+                            # Archivar (borrar) la incidencia activa original
+                            response_archive = requests.patch(
+                                f"https://api.notion.com/v1/pages/{inc['id']}",
+                                headers=headers,
+                                json={"archived": True}
+                            )
+
+                            if response_archive.status_code == 200:
+                                st.success("✅ Incidencia resuelta correctamente.")
+                                st.session_state.solve_inc = None
+                                clear_all_cache()
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Error al archivar incidencia activa: {response_archive.status_code}")
+                                st.code(response_archive.text)
+                        else:
+                            st.error(f"❌ Error al crear incidencia resuelta: {response_create.status_code}")
+                            st.code(response_create.text)
+
+            with col2:
+                if st.button("❌ Cancelar", use_container_width=True):
+                    st.session_state.solve_inc = None
+                    st.rerun()
 
     # -------------------------
     # AÑADIR NUEVA INCIDENCIA
@@ -1309,8 +1425,17 @@ elif st.session_state.menu == "Incidencias":
     with st.expander("➕ Añadir nueva incidencia", expanded=False):
 
         groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
+        
+        # ✅ CAMBIO: Filtrar solo dispositivos con location activa
+        devices_with_location = [
+            d for d in devices 
+            if d.get("location_ids") and len(d["location_ids"]) > 0
+        ]
+        
         devices_filtered, _, _, _ = segmented_tag_filter(
-            devices, groups=groups, key_prefix="new_inc"
+            devices_with_location,  # ✅ Usar la lista filtrada
+            groups=groups, 
+            key_prefix="new_inc"
         )
 
         sel_keys = []
@@ -1348,6 +1473,9 @@ elif st.session_state.menu == "Incidencias":
                 notes = st.text_area("Notas")
 
                 if st.button("Crear incidencia"):
+                    # Usar datetime.now() en lugar de date.today()
+                    now = datetime.now().isoformat()
+                    
                     for did in selected:
 
                         payload = {
@@ -1356,7 +1484,7 @@ elif st.session_state.menu == "Incidencias":
                                 "Name": {"title": [{"text": {"content": name}}]},
                                 "Device": {"relation": [{"id": did}]},
                                 "Notes": {"rich_text": [{"text": {"content": notes}}]},
-                                "Created Date": {"date": {"start": date.today().isoformat()}}
+                                "Created Date": {"date": {"start": now}}
                             }
                         }
 
@@ -1366,7 +1494,11 @@ elif st.session_state.menu == "Incidencias":
                             json=payload
                         )
 
+                    # Deseleccionar todos los checkboxes
+                    for key in sel_keys:
+                        if key in st.session_state:
+                            st.session_state[key] = False
+
                     st.success("Incidencia creada.")
                     clear_all_cache()
                     st.rerun()
-
