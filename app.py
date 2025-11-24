@@ -605,44 +605,60 @@ with st.sidebar:
 
     num_finished = len(finished)
 
-    # ETIQUETAS DEL SEGMENTED CONTROL
-    label_disponibles = "Disponibles para Alquilar"
-    label_casa = "Gafas en casa"
+    # ---------- CONTADOR: Incidencias activas ----------
+    try:
+        actives_nav = load_active_incidents()
+        num_incidencias = len(actives_nav)
+    except:
+        num_incidencias = 0
 
-    label_proximos = (
-        "Próximos Envíos"
-        + ("  🟠" if num_proximos > 0 else "")
-    )
-
-    label_checkin = (
-        "Check-In"
-        + ("  🟠" if num_finished > 0 else "")
-    )
-
-    opciones_segmented = {
-        label_disponibles: "Disponibles para Alquilar",
-        label_casa: "Gafas en casa",
-        label_proximos: "Próximos Envíos",
-        label_checkin: "Check-In",
-        "Incidencias": "Incidencias"
+    # ---------- CREAR OPCIONES CON NÚMEROS ----------
+    st.markdown("### 📋 Navegación")
+    
+    # Función para crear label con número en badge rojo
+    def create_menu_label(text, count=0):
+        if count > 0:
+            # Con badge rojo mostrando el número
+            return f"{text}   ({count})"
+        else:
+            # Sin badge
+            return text
+    
+    # Opciones de navegación con números
+    opciones_menu = [
+        create_menu_label("Disponibles para Alquilar", 0),
+        create_menu_label("Gafas en casa", 0),
+        create_menu_label("Próximos Envíos", num_proximos),
+        create_menu_label("Check-In", num_finished),
+        create_menu_label("Incidencias", num_incidencias)
+    ]
+    
+    # Mapeo de labels a valores internos
+    menu_mapping = {
+        opciones_menu[0]: "Disponibles para Alquilar",
+        opciones_menu[1]: "Gafas en casa",
+        opciones_menu[2]: "Próximos Envíos",
+        opciones_menu[3]: "Check-In",
+        opciones_menu[4]: "Incidencias"
     }
-
-    # Navegación
-    menu_label = st.segmented_control(
-        "Navegación",
-        list(opciones_segmented.keys()),
-        default=list(opciones_segmented.keys())[0]
+    
+    # Radio buttons
+    selected_label = st.radio(
+        label="nav",
+        options=opciones_menu,
+        label_visibility="collapsed",
+        key="nav_radio"
     )
-
-    st.session_state.menu = opciones_segmented[menu_label]
+    
+    # Obtener el valor interno
+    st.session_state.menu = menu_mapping[selected_label]
 
     st.markdown("----")
 
     # REFRESCAR
-    if st.button("🔄 Refrescar"):
+    if st.button("🔄 Refrescar", use_container_width=True):
         clear_all_cache()
         st.rerun()
-
 
 # ---------- Cargar mapa de localizaciones DESPUÉS del sidebar ----------
 locations_map = load_locations_map()
@@ -1243,13 +1259,13 @@ elif st.session_state.menu == "Incidencias":
                         created = fmt_datetime(inc.get('Created'))
 
                         # Crear columnas para botón a la derecha
-                        cols = st.columns([9, 1])
+                        cols = st.columns([8, 2])
 
                         with cols[0]:
                             st.markdown(
                                 f"""
                                 <div style='margin-left:20px; margin-bottom:10px; padding:8px;
-                                            background:#FFEBEE; border-left:3px solid #E53935;
+                                            background:#FFEBEE;
                                             border-radius:4px;'>
                                     <div style='display:flex; align-items:center; margin-bottom:4px;'>
                                         <div style='width:10px; height:10px; background:#E53935;
@@ -1269,7 +1285,7 @@ elif st.session_state.menu == "Incidencias":
 
                         # Botón resolver a la derecha
                         with cols[1]:
-                            if st.button("Fix", key=f"resolve_{inc['id']}", help="Resolver incidencia"):
+                            if st.button("Resolver", key=f"resolve_{inc['id']}", help="Resolver incidencia"):
                                 st.session_state.solve_inc = inc
                                 st.rerun()
 
@@ -1296,7 +1312,7 @@ elif st.session_state.menu == "Incidencias":
                         st.markdown(
                             f"""
                             <div style='margin-left:20px; margin-bottom:10px; padding:8px;
-                                        background:#F5F5F5; border-left:3px solid #9E9E9E;
+                                        background:#F5F5F5; 
                                         border-radius:4px;'>
                                 <div style='display:flex; align-items:center; margin-bottom:4px;'>
                                     <div style='width:10px; height:10px; background:#9E9E9E;
@@ -1419,21 +1435,32 @@ elif st.session_state.menu == "Incidencias":
                     st.session_state.solve_inc = None
                     st.rerun()
 
-    # -------------------------
+   # -------------------------
     # AÑADIR NUEVA INCIDENCIA
     # -------------------------
+    
+    # ✅ NUEVO: Limpiar checkboxes si se creó una incidencia
+    if "clear_new_inc_checkboxes" in st.session_state and st.session_state.clear_new_inc_checkboxes:
+        # Limpiar todos los checkboxes que empiecen con "newinc_"
+        keys_to_clear = [k for k in st.session_state.keys() if k.startswith("newinc_")]
+        for key in keys_to_clear:
+            st.session_state[key] = False
+        
+        # Limpiar la bandera
+        st.session_state.clear_new_inc_checkboxes = False
+    
     with st.expander("➕ Añadir nueva incidencia", expanded=False):
 
         groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3"]
         
-        # ✅ CAMBIO: Filtrar solo dispositivos con location activa
+        # Filtrar solo dispositivos con location activa
         devices_with_location = [
             d for d in devices 
             if d.get("location_ids") and len(d["location_ids"]) > 0
         ]
         
         devices_filtered, _, _, _ = segmented_tag_filter(
-            devices_with_location,  # ✅ Usar la lista filtrada
+            devices_with_location,
             groups=groups, 
             key_prefix="new_inc"
         )
@@ -1465,40 +1492,64 @@ elif st.session_state.menu == "Incidencias":
             k.split("_")[1] for k in sel_keys if st.session_state.get(k, False)
         ]
 
+        # Mostrar contador de seleccionados
+        if selected:
+            with st.sidebar:
+                counter_badge(len(selected), len(devices_filtered))
+
         # Sidebar: crear incidencia
         with st.sidebar:
             if selected:
                 st.header("Nueva incidencia")
-                name = st.text_input("Título incidencia")
-                notes = st.text_area("Notas")
+                name = st.text_input("Título incidencia", key="new_inc_name")
+                notes = st.text_area("Notas", key="new_inc_notes")
 
-                if st.button("Crear incidencia"):
-                    # Usar datetime.now() en lugar de date.today()
-                    now = datetime.now().isoformat()
+                if st.button("Crear incidencia", type="primary", use_container_width=True):
                     
-                    for did in selected:
+                    # Validación: verificar que hay título
+                    if not name or name.strip() == "":
+                        st.error("❌ Debes escribir un título para la incidencia")
+                    else:
+                        # Usar datetime.now() en lugar de date.today()
+                        now = datetime.now().isoformat()
+                        
+                        success = True
+                        for did in selected:
 
-                        payload = {
-                            "parent": {"database_id": ACTIVE_INC_ID},
-                            "properties": {
-                                "Name": {"title": [{"text": {"content": name}}]},
-                                "Device": {"relation": [{"id": did}]},
-                                "Notes": {"rich_text": [{"text": {"content": notes}}]},
-                                "Created Date": {"date": {"start": now}}
+                            payload = {
+                                "parent": {"database_id": ACTIVE_INC_ID},
+                                "properties": {
+                                    "Name": {"title": [{"text": {"content": name}}]},
+                                    "Device": {"relation": [{"id": did}]},
+                                    "Notes": {"rich_text": [{"text": {"content": notes}}]},
+                                    "Created Date": {"date": {"start": now}}
+                                }
                             }
-                        }
 
-                        requests.post(
-                            "https://api.notion.com/v1/pages",
-                            headers=headers,
-                            json=payload
-                        )
+                            response = requests.post(
+                                "https://api.notion.com/v1/pages",
+                                headers=headers,
+                                json=payload
+                            )
+                            
+                            if response.status_code != 200:
+                                st.error(f"❌ Error al crear incidencia: {response.status_code}")
+                                st.code(response.text)
+                                success = False
+                                break
 
-                    # Deseleccionar todos los checkboxes
-                    for key in sel_keys:
-                        if key in st.session_state:
-                            st.session_state[key] = False
+                        if success:
+                            # ✅ CAMBIO: Activar bandera para limpiar checkboxes
+                            st.session_state.clear_new_inc_checkboxes = True
 
-                    st.success("Incidencia creada.")
-                    clear_all_cache()
-                    st.rerun()
+                            # ✅ Limpiar campos del formulario
+                            if "new_inc_name" in st.session_state:
+                                del st.session_state["new_inc_name"]
+                            if "new_inc_notes" in st.session_state:
+                                del st.session_state["new_inc_notes"]
+
+                            # ✅ Limpiar caché
+                            clear_all_cache()
+                            
+                            # ✅ Recargar página
+                            st.rerun()
