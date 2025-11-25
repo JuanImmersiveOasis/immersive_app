@@ -1303,26 +1303,104 @@ elif st.session_state.menu == "Incidencias":
     # EXPANDER 1 — LISTADO DE INCIDENCIAS (SIEMPRE ABIERTO)
     # ============================================================
 
-    with st.expander(f"Gafas con incidencias ({total_active} activas)", expanded=True):
+    with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=True):
+        
+        # ============================================================
+        # SEGMENTADOR POR TIPO DE DISPOSITIVO (DENTRO DEL EXPANDER)
+        # ============================================================
+        
+        # Obtener todos los dispositivos con incidencias
+        devices_with_incidents = [device_map[did] for did in incidents_by_device.keys() if did in device_map]
+        
+        # Filtrar por tipo de dispositivo usando el segmentador
+        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
+        devices_filtered, selected_group, counts, opciones = segmented_tag_filter(
+            devices_with_incidents, 
+            groups=groups, 
+            key_prefix="incidents_filter"
+        )
+        
+        # Filtrar incidents_by_device según los dispositivos filtrados
+        filtered_device_ids = {d["id"] for d in devices_filtered}
+        filtered_incidents_by_device = {
+            did: lists for did, lists in incidents_by_device.items() 
+            if did in filtered_device_ids
+        }
+        
+        # Recalcular total activas después del filtro
+        total_active_filtered = sum(len(v["active"]) for v in filtered_incidents_by_device.values())
 
-        if not incidents_by_device:
-            st.info("No hay incidencias registradas.")
+        if not filtered_incidents_by_device:
+            st.info("No hay incidencias registradas para este tipo de dispositivo.")
         else:
-            for did, lists in incidents_by_device.items():
+            # ============================================================
+            # PREPARAR LISTA DE INCIDENCIAS PARA PAGINAR
+            # ============================================================
+            
+            # Crear lista de todas las incidencias para paginar
+            all_incidents_list = []
+            for did, lists in filtered_incidents_by_device.items():
                 dev = device_map.get(did)
                 dev_name = dev["Name"] if dev else "Dispositivo desconocido"
-
+                
+                # Añadir incidencias activas
                 active_sorted = sorted(
                     lists["active"], key=lambda x: x.get("Created") or "", reverse=True
                 )
+                for inc in active_sorted:
+                    all_incidents_list.append({
+                        "type": "active",
+                        "dev_name": dev_name,
+                        "inc": inc
+                    })
+                
+                # Añadir incidencias pasadas
                 past_sorted = sorted(
                     lists["past"], key=lambda x: x.get("Created") or "", reverse=True
                 )
-
-                # ============================================================
-                # INCIDENCIAS ACTIVAS (ROJO)
-                # ============================================================
-                for inc in active_sorted:
+                for inc in past_sorted:
+                    all_incidents_list.append({
+                        "type": "past",
+                        "dev_name": dev_name,
+                        "inc": inc
+                    })
+            
+            # ============================================================
+            # CONFIGURACIÓN DEL PAGINADOR
+            # ============================================================
+            
+            items_per_page = 10  # Número de incidencias por página
+            total_items = len(all_incidents_list)
+            total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+            
+            # Inicializar página actual en session_state
+            if "incidents_current_page" not in st.session_state:
+                st.session_state.incidents_current_page = 1
+            
+            # Asegurarse de que la página actual esté dentro del rango válido
+            if st.session_state.incidents_current_page > total_pages:
+                st.session_state.incidents_current_page = 1
+            
+            # Calcular índices para la página actual
+            start_idx = (st.session_state.incidents_current_page - 1) * items_per_page
+            end_idx = start_idx + items_per_page
+            
+            # Obtener incidencias de la página actual
+            current_page_incidents = all_incidents_list[start_idx:end_idx]
+            
+            # ============================================================
+            # MOSTRAR INCIDENCIAS DE LA PÁGINA ACTUAL
+            # ============================================================
+            
+            for item in current_page_incidents:
+                inc = item["inc"]
+                dev_name = item["dev_name"]
+                inc_type = item["type"]
+                
+                if inc_type == "active":
+                    # ============================================================
+                    # INCIDENCIAS ACTIVAS (ROJO)
+                    # ============================================================
                     notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
                     created = fmt_datetime(inc.get("Created"))
 
@@ -1337,11 +1415,11 @@ elif st.session_state.menu == "Incidencias":
                         if st.button("Resolver", key=f"resolve_{inc['id']}", use_container_width=True):
                             st.session_state.solve_inc = inc
                             st.rerun()
-
-                # ============================================================
-                # INCIDENCIAS PASADAS (GRIS)
-                # ============================================================
-                for inc in past_sorted:
+                
+                else:
+                    # ============================================================
+                    # INCIDENCIAS PASADAS (GRIS)
+                    # ============================================================
                     notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
                     created = fmt_datetime(inc.get("Created"))
                     resolved = fmt_datetime(inc.get("Resolved"))
@@ -1356,8 +1434,96 @@ elif st.session_state.menu == "Incidencias":
                         f"""<div style='margin-left:20px;margin-bottom:10px;padding:8px;background:#F5F5F5;border-radius:4px;'><div style='display:flex;align-items:center;margin-bottom:4px;'><div style='width:10px;height:10px;background:#9E9E9E;border-radius:50%;margin-right:8px;'></div><strong style='font-size:14px;color:#555;'>{dev_name}</strong><span style='margin:0 6px;color:#AAA;'>|</span><strong style='font-size:14px;color:#555;'>{inc['Name']}</strong><span style='margin-left:8px;color:#888;font-size:12px;'>Creada: {created} → Resuelta: {resolved}</span></div><div style='margin-left:18px;color:#666;font-size:13px;'>{notes if notes else '<em>Sin notas</em>'}</div>{rnotes_html}</div>""",
                         unsafe_allow_html=True
                     )
-
-                st.markdown("<div style='height:15px;'></div>", unsafe_allow_html=True)
+            
+            # ============================================================
+            # PAGINADOR CON NÚMEROS (ABAJO A LA DERECHA)
+            # ============================================================
+            
+            if total_pages > 1:
+                st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+                
+                # Crear contenedor alineado a la derecha
+                col_spacer, col_pagination = st.columns([8, 2])
+                
+                with col_pagination:
+                    # Determinar qué páginas mostrar
+                    max_visible_pages = 5  # Número máximo de botones de página visibles
+                    
+                    # Calcular rango de páginas a mostrar
+                    if total_pages <= max_visible_pages:
+                        page_range = range(1, total_pages + 1)
+                    else:
+                        # Mostrar páginas alrededor de la página actual
+                        start_page = max(1, st.session_state.incidents_current_page - 2)
+                        end_page = min(total_pages, start_page + max_visible_pages - 1)
+                        
+                        # Ajustar si estamos cerca del final
+                        if end_page == total_pages:
+                            start_page = max(1, end_page - max_visible_pages + 1)
+                        
+                        page_range = range(start_page, end_page + 1)
+                    
+                    # Crear botones de página
+                    page_buttons = []
+                    
+                    # Botón "Primera página" si no está visible
+                    if 1 not in page_range and total_pages > max_visible_pages:
+                        page_buttons.append("1")
+                        if min(page_range) > 2:
+                            page_buttons.append("...")
+                    
+                    # Botones de páginas
+                    for page_num in page_range:
+                        page_buttons.append(str(page_num))
+                    
+                    # Botón "Última página" si no está visible
+                    if total_pages not in page_range and total_pages > max_visible_pages:
+                        if max(page_range) < total_pages - 1:
+                            page_buttons.append("...")
+                        page_buttons.append(str(total_pages))
+                    
+                    # Crear HTML para los botones
+                    buttons_html = "<div style='display:flex;justify-content:flex-end;gap:5px;flex-wrap:wrap;'>"
+                    
+                    for btn_text in page_buttons:
+                        if btn_text == "...":
+                            buttons_html += "<span style='padding:6px 10px;color:#999;'>...</span>"
+                        else:
+                            page_num = int(btn_text)
+                            is_current = (page_num == st.session_state.incidents_current_page)
+                            
+                            bg_color = "#B3E5E6" if is_current else "#E0E0E0"
+                            text_color = "#000" if is_current else "#666"
+                            cursor = "default" if is_current else "pointer"
+                            font_weight = "bold" if is_current else "normal"
+                            
+                            buttons_html += f"""
+                            <div style='padding:6px 12px;background:{bg_color};color:{text_color};
+                                        border-radius:4px;cursor:{cursor};font-weight:{font_weight};
+                                        user-select:none;min-width:30px;text-align:center;'>
+                                {btn_text}
+                            </div>
+                            """
+                    
+                    buttons_html += "</div>"
+                    
+                    st.markdown(buttons_html, unsafe_allow_html=True)
+                    
+                    # Crear columnas para los botones clicables
+                    cols = st.columns(len(page_buttons))
+                    
+                    for idx, btn_text in enumerate(page_buttons):
+                        if btn_text != "...":
+                            page_num = int(btn_text)
+                            with cols[idx]:
+                                if st.button(
+                                    " ", 
+                                    key=f"page_{page_num}", 
+                                    disabled=(page_num == st.session_state.incidents_current_page),
+                                    use_container_width=True
+                                ):
+                                    st.session_state.incidents_current_page = page_num
+                                    st.rerun()
 
     # ============================================================
     # SIDEBAR — RESOLVER INCIDENCIA
@@ -1463,13 +1629,13 @@ elif st.session_state.menu == "Incidencias":
 
         groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
 
-        devices_filtered, _, _, _ = segmented_tag_filter(
+        devices_filtered_new, _, _, _ = segmented_tag_filter(
             devices, groups=groups, key_prefix="new_inc"
         )
 
         sel_keys = []
 
-        for d in devices_filtered:
+        for d in devices_filtered_new:
             key = f"newinc_{d['id']}"
             sel_keys.append(key)
 
@@ -1493,7 +1659,7 @@ elif st.session_state.menu == "Incidencias":
 
         with st.sidebar:
             if selected_devices:
-                counter_badge(len(selected_devices), len(devices_filtered))
+                counter_badge(len(selected_devices), len(devices_filtered_new))
 
                 name = st.text_input("Título incidencia", key="new_inc_name")
                 notes = st.text_area("Notas", key="new_inc_notes")
@@ -1545,6 +1711,9 @@ elif st.session_state.menu == "Incidencias":
                                         del st.session_state["new_inc_notes"]
 
                                     st.session_state.add_new_incident_expander = False
+                                    
+                                    # Resetear página a 1 cuando se crean nuevas incidencias
+                                    st.session_state.incidents_current_page = 1
 
                                     cache_mgr.invalidate(
                                         "active_incidents", "past_incidents", "incidence_map"
