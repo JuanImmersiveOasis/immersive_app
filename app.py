@@ -1303,7 +1303,7 @@ elif st.session_state.menu == "Incidencias":
     # EXPANDER 1 — LISTADO DE INCIDENCIAS (SIEMPRE ABIERTO)
     # ============================================================
 
-    with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=True):
+    with st.expander(f"Gafas con incidencias ({total_active} activas)", expanded=True):
         
         # ============================================================
         # SEGMENTADOR POR TIPO DE DISPOSITIVO (DENTRO DEL EXPANDER)
@@ -1312,13 +1312,85 @@ elif st.session_state.menu == "Incidencias":
         # Obtener todos los dispositivos con incidencias
         devices_with_incidents = [device_map[did] for did in incidents_by_device.keys() if did in device_map]
         
-        # Filtrar por tipo de dispositivo usando el segmentador
+        # Calcular contadores por tipo de dispositivo
         groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
-        devices_filtered, selected_group, counts, opciones = segmented_tag_filter(
-            devices_with_incidents, 
-            groups=groups, 
-            key_prefix="incidents_filter"
+        
+        # Contar TOTAL de incidencias (activas + pasadas) y si hay ACTIVAS por grupo
+        total_counts = {"Todas": 0}
+        active_counts = {"Todas": 0}
+        
+        for g in groups:
+            total_counts[g] = 0
+            active_counts[g] = 0
+        
+        for did, lists in incidents_by_device.items():
+            if did not in device_map:
+                continue
+            dev = device_map[did]
+            tag = dev.get("Tags")
+            
+            num_total = len(lists["active"]) + len(lists["past"])
+            num_active = len(lists["active"])
+            
+            total_counts["Todas"] += num_total
+            active_counts["Todas"] += num_active
+            
+            if tag in total_counts:
+                total_counts[tag] += num_total
+                active_counts[tag] += num_active
+        
+        # Crear opciones personalizadas con color rojo si hay incidencias activas
+        present_tags = sorted({d.get("Tags") for d in devices_with_incidents if d.get("Tags")})
+        
+        # Construir las opciones del segmentador
+        opciones_display = []
+        opciones_map = {}
+        
+        # Opción "Todas"
+        count_total_all = total_counts["Todas"]
+        count_active_all = active_counts["Todas"]
+        
+        if count_active_all > 0:
+            label_all = f"Todas :red[({count_total_all})]"
+        else:
+            label_all = f"Todas ({count_total_all})"
+        
+        opciones_display.append(label_all)
+        opciones_map[label_all] = "Todas"
+        
+        # Opciones por grupo
+        for g in groups:
+            if g in present_tags:
+                count_total = total_counts.get(g, 0)
+                count_active = active_counts.get(g, 0)
+                
+                if count_active > 0:
+                    label = f"{g} :red[({count_total})]"
+                else:
+                    label = f"{g} ({count_total})"
+                
+                opciones_display.append(label)
+                opciones_map[label] = g
+        
+        # Mostrar el segmentador
+        sel_label = st.segmented_control(
+            label=None,
+            options=opciones_display,
+            default=opciones_display[0],
+            key="incidents_filter_seg"
         )
+        
+        if sel_label not in opciones_map:
+            sel_label = opciones_display[0]
+            st.session_state["incidents_filter_seg"] = sel_label
+        
+        selected_group = opciones_map[sel_label]
+        
+        # Filtrar dispositivos según el grupo seleccionado
+        if selected_group == "Todas":
+            devices_filtered = devices_with_incidents
+        else:
+            devices_filtered = [d for d in devices_with_incidents if d.get("Tags") == selected_group]
         
         # Filtrar incidents_by_device según los dispositivos filtrados
         filtered_device_ids = {d["id"] for d in devices_filtered}
@@ -1326,6 +1398,13 @@ elif st.session_state.menu == "Incidencias":
             did: lists for did, lists in incidents_by_device.items() 
             if did in filtered_device_ids
         }
+        
+        # Resetear a página 1 cuando cambia el filtro
+        if "last_selected_group" not in st.session_state:
+            st.session_state.last_selected_group = selected_group
+        elif st.session_state.last_selected_group != selected_group:
+            st.session_state.incidents_current_page = 1
+            st.session_state.last_selected_group = selected_group
         
         # Recalcular total activas después del filtro
         total_active_filtered = sum(len(v["active"]) for v in filtered_incidents_by_device.values())
