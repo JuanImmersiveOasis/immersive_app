@@ -1057,12 +1057,19 @@ if st.session_state.menu == "Disponibles para Alquilar":
 # ============================================================
 # PANTALLA 2: GAFAS EN CASA
 # ============================================================
+# ============================================================
+# PANTALLA 2: GAFAS EN CASA
+# ============================================================
+# ============================================================
+# PANTALLA 2: GAFAS EN CASA
+# ============================================================
 
 elif st.session_state.menu == "Gafas en casa":
     st.title("Gafas en casa")
     # Botón de leyenda
     legend_button()
     
+    # SIEMPRE cargar datos frescos si no existen
     if "devices_live" not in st.session_state:
         st.session_state.devices_live = load_devices()
     
@@ -1121,12 +1128,19 @@ elif st.session_state.menu == "Gafas en casa":
                                             resp = assign_device(d["id"], oid)
                                             
                                             if resp.status_code == 200:
-                                                feedback_placeholder.empty()
-                                                show_feedback('success', "Movido a oficina", duration=1)
+                                                # Borrar TODOS los cachés
+                                                cache_mgr.clear_all()
                                                 
-                                                cache_mgr.invalidate('devices')
-                                                st.session_state.devices_live = load_devices()
-                                                time.sleep(1)
+                                                # Borrar devices_live
+                                                if 'devices_live' in st.session_state:
+                                                    del st.session_state['devices_live']
+                                                
+                                                # Mostrar feedback
+                                                feedback_placeholder.empty()
+                                                show_feedback('success', "Movido a oficina", duration=1.5)
+                                                
+                                                # Esperar MÁS tiempo para que Notion actualice
+                                                time.sleep(1.5)
                                                 st.rerun()
                                             else:
                                                 feedback_placeholder.empty()
@@ -1188,24 +1202,31 @@ elif st.session_state.menu == "Gafas en casa":
                                 if resp.status_code == 200:
                                     success_count += 1
                             
+                            # Limpiar selección
                             st.session_state.sel2 = []
                             for key in list(st.session_state.keys()):
                                 if key.startswith("o_"):
                                     del st.session_state[key]
                             
+                            # Cerrar expander
                             st.session_state.expander_office_open = False
                             
-                            cache_mgr.invalidate('devices')
-                            st.session_state.devices_live = load_devices()
+                            # Borrar TODOS los cachés
+                            cache_mgr.clear_all()
                             
+                            # Borrar devices_live
+                            if 'devices_live' in st.session_state:
+                                del st.session_state['devices_live']
+                            
+                            # Feedback y rerun
                             feedback_placeholder.empty()
-                            show_feedback('success', f"{success_count} dispositivos asignados", duration=1)
-                            time.sleep(1)
+                            show_feedback('success', f"{success_count} dispositivos asignados", duration=1.5)
+                            time.sleep(1.5)
                             st.rerun()
     
     if not expander_office_open:
         st.session_state.expander_office_open = False
-
+        
 # ============================================================
 # PANTALLA 3: PRÓXIMOS ENVÍOS
 # ============================================================
