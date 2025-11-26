@@ -636,6 +636,26 @@ for key, default in [
 # ============================================================
 
 with st.sidebar:
+    # Logo y título
+    col_logo, col_title = st.columns([1, 3])
+    with col_logo:
+        st.image("img/icono.png", width=60)
+    with col_title:
+        st.markdown(
+            """
+            <div style='padding-top:10px;'>
+                <h2 style='margin:0;color:#333;'>Logística</h2>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    st.markdown("---")
+    
+    try:
+        num_proximos = len(load_future_client_locations())
+    except:
+        num_proximos = 0
     try:
         num_proximos = len(load_future_client_locations())
     except:
@@ -1303,7 +1323,7 @@ elif st.session_state.menu == "Incidencias":
     # EXPANDER 1 — LISTADO DE INCIDENCIAS (SIEMPRE ABIERTO)
     # ============================================================
 
-    with st.expander(f"Gafas con incidencias ({total_active} activas)", expanded=True):
+    with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=True):
         
         # ============================================================
         # SEGMENTADOR POR TIPO DE DISPOSITIVO (DENTRO DEL EXPANDER)
