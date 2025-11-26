@@ -205,21 +205,141 @@ def assign_device(dev_id, loc_id):
 # COMPONENTES DE UI
 # ============================================================
 
-def render_legend():
+def legend_button():
+    """
+    Crea un botón de ayuda (?) que muestra la leyenda al hacer hover
+    Se coloca alineado a la derecha
+    """
     st.markdown(
-        """
-        <div style='margin-bottom:10px;'>
-            <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
-                         font-weight:bold;color:#fff;background:#4CAF50;border-radius:4px;margin-right:6px'>O</span>
-            Office: Las gafas se encuentran DISPONIBLES en oficina, libres de compromisos.<br>
-            <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
-                         font-weight:bold;color:#fff;background:#FF9800;border-radius:4px;margin-right:6px'>C</span>
-            Client: Las gafas se encuentran ASIGNADAS a un proyecto en otras fechas.<br>
-            <span style='display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;
-                         font-weight:bold;color:#fff;background:#1565C0;border-radius:4px;margin-right:6px'>H</span>
-            At Home: Las gafas se encuentran en casa de algún miembro del equipo.
+        '''
+        <style>
+        .legend-container {
+            position: relative;
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 15px;
+            margin-top: -45px;
+        }
+        
+        .legend-button {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #e0e0e0;
+            color: #666;
+            border: none;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: help;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        
+        .legend-button:hover {
+            background: #00859b;
+            color: white;
+        }
+        
+        .legend-tooltip {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            top: 35px;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            width: 520px;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .legend-button:hover + .legend-tooltip,
+        .legend-tooltip:hover {
+            visibility: visible;
+            opacity: 1;
+            pointer-events: auto;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .legend-badge {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            line-height: 24px;
+            text-align: center;
+            font-weight: bold;
+            color: #fff;
+            border-radius: 4px;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+        
+        .legend-incident-badge {
+            display: inline-block;
+            min-width: 35px;
+            height: 24px;
+            line-height: 24px;
+            text-align: center;
+            font-weight: bold;
+            color: #fff;
+            border-radius: 4px;
+            margin-right: 10px;
+            padding: 0 6px;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+        
+        .legend-text {
+            font-size: 13px;
+            color: #333;
+            line-height: 1.4;
+        }
+        
+        .legend-divider {
+            height: 1px;
+            background: #e0e0e0;
+            margin: 12px 0;
+        }
+        </style>
+        
+        <div class="legend-container">
+            <div class="legend-button">?</div>
+            <div class="legend-tooltip">
+                <div class="legend-item">
+                    <span class="legend-badge" style="background:#4CAF50;">O</span>
+                    <span class="legend-text"><strong>Office:</strong> Las gafas se encuentran DISPONIBLES en oficina, libres de compromisos.</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background:#FF9800;">C</span>
+                    <span class="legend-text"><strong>Client:</strong> Las gafas se encuentran ASIGNADAS a un proyecto en otras fechas.</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background:#1565C0;">H</span>
+                    <span class="legend-text"><strong>At Home:</strong> Las gafas se encuentran en casa de algun miembro del equipo.</span>
+                </div>
+                <div class="legend-divider"></div>
+                <div class="legend-item">
+                    <span class="legend-incident-badge" style="background:#9E9E9E;">0/1</span>
+                    <span class="legend-text">Dispositivos con incidencias resueltas en el pasado.</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-incident-badge" style="background:#E53935;">1/1</span>
+                    <span class="legend-text">Dispositivos con alguna incidencia sin resolver actualmente.</span>
+                </div>
+            </div>
         </div>
-        """,
+        ''',
         unsafe_allow_html=True
     )
 
@@ -830,9 +950,8 @@ incidence_map = load_incidence_map()
 
 if st.session_state.menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
-    
-    with st.expander("Leyenda de estados"):
-        render_legend()
+     # Botón de leyenda alineado a la derecha
+    legend_button()
     
     c1, c2 = st.columns(2)
     with c1:
@@ -858,8 +977,10 @@ if st.session_state.menu == "Disponibles para Alquilar":
         # Segmentador fuera del contenedor con scroll
         avail_filtered, _ = smart_segmented_filter(avail, key_prefix="tab1")
         
+       
+        
         # Contenedor con scroll para las cards
-        with st.container(height=600, border=True):
+        with st.container(height=400, border=True):
             for d in avail_filtered:
                 key = f"a_{d['id']}"
                 subtitle = get_location_types_for_device(d, locations_map)
@@ -941,6 +1062,8 @@ if st.session_state.menu == "Disponibles para Alquilar":
 
 elif st.session_state.menu == "Gafas en casa":
     st.title("Gafas en casa")
+    # Botón de leyenda
+    legend_button()
     
     if "devices_live" not in st.session_state:
         st.session_state.devices_live = load_devices()
@@ -948,9 +1071,6 @@ elif st.session_state.menu == "Gafas en casa":
     devices = st.session_state.devices_live
     inh = load_inhouse()
     oid = office_id()
-    
-    with st.expander("Leyenda de estados"):
-        render_legend()
     
     inh_ids = [p["id"] for p in inh]
     
@@ -963,6 +1083,8 @@ elif st.session_state.menu == "Gafas en casa":
         # Segmentador fuera del contenedor con scroll
         inhouse_filtered, _ = smart_segmented_filter(inhouse_devices, key_prefix="inhouse")
         
+        
+        
         people_devices = {p["id"]: [] for p in inh}
         for d in inhouse_filtered:
             for lid in d["location_ids"]:
@@ -974,7 +1096,7 @@ elif st.session_state.menu == "Gafas en casa":
         ]
         
         # Contenedor con scroll
-        with st.container(height=500, border=True):
+        with st.container(border=False):
             for person in people_with_devices:
                 pid = person["id"]
                 pname = person["name"]
@@ -982,7 +1104,7 @@ elif st.session_state.menu == "Gafas en casa":
                 
                 with st.expander(f"{pname} ({len(devs)})"):
                     for d in devs:
-                        cols = st.columns([9, 1])
+                        cols = st.columns([8, 2])
                         
                         with cols[0]:
                             inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
@@ -993,7 +1115,7 @@ elif st.session_state.menu == "Gafas en casa":
                             )
                         
                         with cols[1]:
-                            if st.button("Quitar", key=f"rm_{d['id']}", use_container_width=True):
+                            if st.button("Devolver", key=f"rm_{d['id']}", use_container_width=True):
                                 with st.sidebar:
                                     feedback_placeholder = st.empty()
                                     with feedback_placeholder:
@@ -1026,7 +1148,7 @@ elif st.session_state.menu == "Gafas en casa":
         office_filtered, _ = smart_segmented_filter(office_devices, key_prefix="office")
         
         # Contenedor con scroll
-        with st.container(height=500, border=True):
+        with st.container(height=400, border=True):
             for d in office_filtered:
                 key = f"o_{d['id']}"
                 subtitle = get_location_types_for_device(d, locations_map)
@@ -1092,9 +1214,8 @@ elif st.session_state.menu == "Gafas en casa":
 
 elif st.session_state.menu == "Próximos Envíos":
     st.title("Próximos Envíos")
-    
-    with st.expander("Leyenda de estados"):
-        render_legend()
+    # Botón de leyenda
+    legend_button()
     
     future_locs = load_future_client_locations()
     
@@ -1128,9 +1249,9 @@ elif st.session_state.menu == "Próximos Envíos":
                 assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
                 
                 # Contenedor con scroll
-                with st.container(height=400, border=True):
+                with st.container(border=False):
                     for d in assigned_filtered:
-                        cols = st.columns([9, 1])
+                        cols = st.columns([8, 2])
                         
                         with cols[0]:
                             subtitle = get_location_types_for_device(d, locations_map)
@@ -1254,9 +1375,6 @@ elif st.session_state.menu == "Próximos Envíos":
 elif st.session_state.menu == "Check-In":
     st.title("Check-In de Gafas")
     
-    with st.expander("Leyenda de estados"):
-        render_legend()
-    
     today = date.today()
     all_locs = q(LOCATIONS_ID, cache_ttl=300)
     devices = load_devices()
@@ -1314,10 +1432,13 @@ elif st.session_state.menu == "Check-In":
         office = office_id()
         
         with st.expander(f"Gafas para recepcionar ({len(assigned)})", expanded=True):
+            # Botón de leyenda
+            legend_button()
+            
             # Contenedor con scroll
-            with st.container(height=500, border=True):
+            with st.container(border=False):
                 for d in assigned:
-                    cols = st.columns([9, 1])
+                    cols = st.columns([8, 2])
                     
                     with cols[0]:
                         subtitle = get_location_types_for_device(d, locations_map)
@@ -1505,7 +1626,7 @@ elif st.session_state.menu == "Incidencias":
             # MOSTRAR INCIDENCIAS DE LA PÁGINA ACTUAL (CON SCROLL)
             # ============================================================
             
-            with st.container(height=600, border=True):
+            with st.container( border=True):
                 for item in current_page_incidents:
                     inc = item["inc"]
                     dev_name = item["dev_name"]
@@ -1555,6 +1676,8 @@ elif st.session_state.menu == "Incidencias":
             
             if total_pages > 1:
                 st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+                # Botón de leyenda
+                legend_button()
                 
                 # Crear contenedor alineado a la derecha
                 col_spacer, col_pagination = st.columns([8, 2])
@@ -1749,11 +1872,13 @@ elif st.session_state.menu == "Incidencias":
 
         # Segmentador fuera del contenedor
         devices_filtered_new, _ = smart_segmented_filter(devices_with_location, key_prefix="new_inc")
+        
+
 
         sel_keys = []
 
         # Contenedor con scroll
-        with st.container(height=500, border=True):
+        with st.container(height=300, border=True):
             for d in devices_filtered_new:
                 key = f"newinc_{d['id']}"
                 sel_keys.append(key)
