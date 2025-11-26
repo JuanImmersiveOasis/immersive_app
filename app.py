@@ -736,26 +736,11 @@ for key, default in [
 # ============================================================
 
 with st.sidebar:
-    # Logo y título
-    col_logo, col_title = st.columns([1, 3])
-    with col_logo:
-        st.image("img/icono.png", width=60)
-    with col_title:
-        st.markdown(
-            """
-            <div style='padding-top:10px;'>
-                <h2 style='margin:0;color:#333;'>Logística</h2>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    # Logo completo que ocupa todo el ancho
+    st.image("img/logo.png", use_container_width=True)
     
     st.markdown("---")
     
-    try:
-        num_proximos = len(load_future_client_locations())
-    except:
-        num_proximos = 0
     try:
         num_proximos = len(load_future_client_locations())
     except:
@@ -870,25 +855,27 @@ if st.session_state.menu == "Disponibles para Alquilar":
             if d.get("location_ids") and available(d, start, end)
         ]
         
-        # Usar el nuevo segmentador inteligente
+        # Segmentador fuera del contenedor con scroll
         avail_filtered, _ = smart_segmented_filter(avail, key_prefix="tab1")
         
-        for d in avail_filtered:
-            key = f"a_{d['id']}"
-            subtitle = get_location_types_for_device(d, locations_map)
-            
-            cols = st.columns([0.5, 9.5])
-            with cols[0]:
-                st.checkbox("", key=key)
-            
-            with cols[1]:
-                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                card(
-                    d["Name"],
-                    location_types=subtitle,
-                    selected=st.session_state.get(key, False),
-                    incident_counts=(inc["active"], inc["total"])
-                )
+        # Contenedor con scroll para las cards
+        with st.container(height=600, border=True):
+            for d in avail_filtered:
+                key = f"a_{d['id']}"
+                subtitle = get_location_types_for_device(d, locations_map)
+                
+                cols = st.columns([0.5, 9.5])
+                with cols[0]:
+                    st.checkbox("", key=key)
+                
+                with cols[1]:
+                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                    card(
+                        d["Name"],
+                        location_types=subtitle,
+                        selected=st.session_state.get(key, False),
+                        incident_counts=(inc["active"], inc["total"])
+                    )
         
         st.session_state.sel1 = [
             d["id"] for d in avail_filtered if st.session_state.get(f"a_{d['id']}", False)
@@ -973,7 +960,7 @@ elif st.session_state.menu == "Gafas en casa":
     ]
     
     with st.expander("Personal con dispositivos en casa", expanded=True):
-        # Usar el nuevo segmentador inteligente
+        # Segmentador fuera del contenedor con scroll
         inhouse_filtered, _ = smart_segmented_filter(inhouse_devices, key_prefix="inhouse")
         
         people_devices = {p["id"]: [] for p in inh}
@@ -986,42 +973,44 @@ elif st.session_state.menu == "Gafas en casa":
             p for p in inh if len(people_devices[p["id"]]) > 0
         ]
         
-        for person in people_with_devices:
-            pid = person["id"]
-            pname = person["name"]
-            devs = people_devices.get(pid, [])
-            
-            with st.expander(f"{pname} ({len(devs)})"):
-                for d in devs:
-                    cols = st.columns([9, 1])
-                    
-                    with cols[0]:
-                        inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                        card(
-                            d["Name"],
-                            location_types="In House",
-                            incident_counts=(inc["active"], inc["total"])
-                        )
-                    
-                    with cols[1]:
-                        if st.button("Quitar", key=f"rm_{d['id']}", use_container_width=True):
-                            with st.sidebar:
-                                feedback_placeholder = st.empty()
-                                with feedback_placeholder:
-                                    with st.spinner("Moviendo a oficina..."):
-                                        resp = assign_device(d["id"], oid)
-                                        
-                                        if resp.status_code == 200:
-                                            feedback_placeholder.empty()
-                                            show_feedback('success', "Movido a oficina", duration=1)
+        # Contenedor con scroll
+        with st.container(height=500, border=True):
+            for person in people_with_devices:
+                pid = person["id"]
+                pname = person["name"]
+                devs = people_devices.get(pid, [])
+                
+                with st.expander(f"{pname} ({len(devs)})"):
+                    for d in devs:
+                        cols = st.columns([9, 1])
+                        
+                        with cols[0]:
+                            inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                            card(
+                                d["Name"],
+                                location_types="In House",
+                                incident_counts=(inc["active"], inc["total"])
+                            )
+                        
+                        with cols[1]:
+                            if st.button("Quitar", key=f"rm_{d['id']}", use_container_width=True):
+                                with st.sidebar:
+                                    feedback_placeholder = st.empty()
+                                    with feedback_placeholder:
+                                        with st.spinner("Moviendo a oficina..."):
+                                            resp = assign_device(d["id"], oid)
                                             
-                                            cache_mgr.invalidate('devices')
-                                            st.session_state.devices_live = load_devices()
-                                            time.sleep(1)
-                                            st.rerun()
-                                        else:
-                                            feedback_placeholder.empty()
-                                            show_feedback('error', f"Error: {resp.status_code}", duration=2)
+                                            if resp.status_code == 200:
+                                                feedback_placeholder.empty()
+                                                show_feedback('success', "Movido a oficina", duration=1)
+                                                
+                                                cache_mgr.invalidate('devices')
+                                                st.session_state.devices_live = load_devices()
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                feedback_placeholder.empty()
+                                                show_feedback('error', f"Error: {resp.status_code}", duration=2)
     
     office_devices = [
         d for d in devices
@@ -1033,26 +1022,28 @@ elif st.session_state.menu == "Gafas en casa":
     with st.expander("Otras gafas disponibles en oficina", expanded=expander_office_open):
         st.session_state.expander_office_open = True
         
-        # Usar el nuevo segmentador inteligente
+        # Segmentador fuera del contenedor con scroll
         office_filtered, _ = smart_segmented_filter(office_devices, key_prefix="office")
         
-        for d in office_filtered:
-            key = f"o_{d['id']}"
-            subtitle = get_location_types_for_device(d, locations_map)
-            
-            cols = st.columns([0.5, 9.5])
-            
-            with cols[0]:
-                st.checkbox("", key=key)
-            
-            with cols[1]:
-                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                card(
-                    d["Name"],
-                    location_types=subtitle,
-                    selected=st.session_state.get(key, False),
-                    incident_counts=(inc["active"], inc["total"])
-                )
+        # Contenedor con scroll
+        with st.container(height=500, border=True):
+            for d in office_filtered:
+                key = f"o_{d['id']}"
+                subtitle = get_location_types_for_device(d, locations_map)
+                
+                cols = st.columns([0.5, 9.5])
+                
+                with cols[0]:
+                    st.checkbox("", key=key)
+                
+                with cols[1]:
+                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                    card(
+                        d["Name"],
+                        location_types=subtitle,
+                        selected=st.session_state.get(key, False),
+                        incident_counts=(inc["active"], inc["total"])
+                    )
         
         st.session_state.sel2 = [
             d["id"] for d in office_filtered
@@ -1133,40 +1124,42 @@ elif st.session_state.menu == "Próximos Envíos":
                 
                 st.subheader("Dispositivos asignados")
                 
-                # Usar el nuevo segmentador inteligente
+                # Segmentador fuera del contenedor
                 assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
                 
-                for d in assigned_filtered:
-                    cols = st.columns([9, 1])
-                    
-                    with cols[0]:
-                        subtitle = get_location_types_for_device(d, locations_map)
-                        inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                        card(
-                            d["Name"],
-                            location_types=subtitle,
-                            incident_counts=(inc["active"], inc["total"])
-                        )
-                    
-                    with cols[1]:
-                        if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
-                            with st.sidebar:
-                                feedback_placeholder = st.empty()
-                                with feedback_placeholder:
-                                    with st.spinner("Quitando dispositivo..."):
-                                        resp = assign_device(d["id"], office_id())
-                                        
-                                        if resp.status_code == 200:
-                                            feedback_placeholder.empty()
-                                            show_feedback('success', "Dispositivo quitado", duration=1)
+                # Contenedor con scroll
+                with st.container(height=400, border=True):
+                    for d in assigned_filtered:
+                        cols = st.columns([9, 1])
+                        
+                        with cols[0]:
+                            subtitle = get_location_types_for_device(d, locations_map)
+                            inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                            card(
+                                d["Name"],
+                                location_types=subtitle,
+                                incident_counts=(inc["active"], inc["total"])
+                            )
+                        
+                        with cols[1]:
+                            if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
+                                with st.sidebar:
+                                    feedback_placeholder = st.empty()
+                                    with feedback_placeholder:
+                                        with st.spinner("Quitando dispositivo..."):
+                                            resp = assign_device(d["id"], office_id())
                                             
-                                            cache_mgr.invalidate('devices', 'future_locations')
-                                            time.sleep(1)
-                                            st.session_state[expander_key] = True
-                                            st.rerun()
-                                        else:
-                                            feedback_placeholder.empty()
-                                            show_feedback('error', f"Error: {resp.status_code}", duration=2)
+                                            if resp.status_code == 200:
+                                                feedback_placeholder.empty()
+                                                show_feedback('success', "Dispositivo quitado", duration=1)
+                                                
+                                                cache_mgr.invalidate('devices', 'future_locations')
+                                                time.sleep(1)
+                                                st.session_state[expander_key] = True
+                                                st.rerun()
+                                            else:
+                                                feedback_placeholder.empty()
+                                                show_feedback('error', f"Error: {resp.status_code}", duration=2)
                 
                 add_expander_key = f"add_expander_{loc_id}"
                 add_expanded = st.session_state.get(add_expander_key, False)
@@ -1184,30 +1177,32 @@ elif st.session_state.menu == "Próximos Envíos":
                         and loc_id not in d["location_ids"]
                     ]
                     
-                    # Usar el nuevo segmentador inteligente
+                    # Segmentador fuera del contenedor
                     can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
                     
                     checkbox_keys = []
                     
-                    for d in can_add_filtered:
-                        key = f"add_{loc_id}_{d['id']}"
-                        checkbox_keys.append(key)
-                        
-                        subtitle = get_location_types_for_device(d, locations_map)
-                        
-                        cols = st.columns([0.5, 9.5])
-                        
-                        with cols[0]:
-                            st.checkbox("", key=key)
-                        
-                        with cols[1]:
-                            inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                            card(
-                                d["Name"],
-                                location_types=subtitle,
-                                selected=st.session_state.get(key, False),
-                                incident_counts=(inc["active"], inc["total"])
-                            )
+                    # Contenedor con scroll
+                    with st.container(height=400, border=True):
+                        for d in can_add_filtered:
+                            key = f"add_{loc_id}_{d['id']}"
+                            checkbox_keys.append(key)
+                            
+                            subtitle = get_location_types_for_device(d, locations_map)
+                            
+                            cols = st.columns([0.5, 9.5])
+                            
+                            with cols[0]:
+                                st.checkbox("", key=key)
+                            
+                            with cols[1]:
+                                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                card(
+                                    d["Name"],
+                                    location_types=subtitle,
+                                    selected=st.session_state.get(key, False),
+                                    incident_counts=(inc["active"], inc["total"])
+                                )
                     
                     selected_ids = [
                         key.split("_")[-1]
@@ -1319,63 +1314,65 @@ elif st.session_state.menu == "Check-In":
         office = office_id()
         
         with st.expander(f"Gafas para recepcionar ({len(assigned)})", expanded=True):
-            for d in assigned:
-                cols = st.columns([8, 2])
-                
-                with cols[0]:
-                    subtitle = get_location_types_for_device(d, locations_map)
-                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                    card(
-                        d["Name"],
-                        location_types=subtitle,
-                        incident_counts=(inc["active"], inc["total"])
-                    )
-                
-                with cols[1]:
-                    if st.button("Check-In", key=f"checkin_{d['id']}", use_container_width=True):
-                        with st.sidebar:
-                            feedback_placeholder = st.empty()
-                            with feedback_placeholder:
-                                with st.spinner("Procesando Check-In..."):
-                                    payload = {
-                                        "parent": {"database_id": HISTORIC_ID},
-                                        "properties": {
-                                            "Name": {"title": [{"text": {"content": d['Name']}}]},
-                                            "Tags": {"select": {"name": d["Tags"]}} if d.get("Tags") else None,
-                                            "SN": {"rich_text": [{"text": {"content": d.get("SN", "")}}]},
-                                            "Location": {"relation": [{"id": loc["id"]}]},
-                                            "Start Date": {"date": {"start": d["Start"]}} if d.get("Start") else None,
-                                            "End Date": {"date": {"start": d["End"]}} if d.get("End") else None,
-                                            "Check In": {"date": {"start": date.today().isoformat()}}
+            # Contenedor con scroll
+            with st.container(height=500, border=True):
+                for d in assigned:
+                    cols = st.columns([9, 1])
+                    
+                    with cols[0]:
+                        subtitle = get_location_types_for_device(d, locations_map)
+                        inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                        card(
+                            d["Name"],
+                            location_types=subtitle,
+                            incident_counts=(inc["active"], inc["total"])
+                        )
+                    
+                    with cols[1]:
+                        if st.button("Check-In", key=f"checkin_{d['id']}", use_container_width=True):
+                            with st.sidebar:
+                                feedback_placeholder = st.empty()
+                                with feedback_placeholder:
+                                    with st.spinner("Procesando Check-In..."):
+                                        payload = {
+                                            "parent": {"database_id": HISTORIC_ID},
+                                            "properties": {
+                                                "Name": {"title": [{"text": {"content": d['Name']}}]},
+                                                "Tags": {"select": {"name": d["Tags"]}} if d.get("Tags") else None,
+                                                "SN": {"rich_text": [{"text": {"content": d.get("SN", "")}}]},
+                                                "Location": {"relation": [{"id": loc["id"]}]},
+                                                "Start Date": {"date": {"start": d["Start"]}} if d.get("Start") else None,
+                                                "End Date": {"date": {"start": d["End"]}} if d.get("End") else None,
+                                                "Check In": {"date": {"start": date.today().isoformat()}}
+                                            }
                                         }
-                                    }
-                                    
-                                    payload["properties"] = {
-                                        k: v for k, v in payload["properties"].items() if v is not None
-                                    }
-                                    
-                                    r = requests.post(
-                                        "https://api.notion.com/v1/pages",
-                                        headers=headers,
-                                        json=payload
-                                    )
-                                    
-                                    if r.status_code != 200:
-                                        feedback_placeholder.empty()
-                                        show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
-                                    else:
-                                        resp = assign_device(d["id"], office)
                                         
-                                        if resp.status_code == 200:
+                                        payload["properties"] = {
+                                            k: v for k, v in payload["properties"].items() if v is not None
+                                        }
+                                        
+                                        r = requests.post(
+                                            "https://api.notion.com/v1/pages",
+                                            headers=headers,
+                                            json=payload
+                                        )
+                                        
+                                        if r.status_code != 200:
                                             feedback_placeholder.empty()
-                                            show_feedback('success', "Check-In completado", duration=1)
-                                            
-                                            cache_mgr.invalidate('devices')
-                                            time.sleep(1)
-                                            st.rerun()
+                                            show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
                                         else:
-                                            feedback_placeholder.empty()
-                                            show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
+                                            resp = assign_device(d["id"], office)
+                                            
+                                            if resp.status_code == 200:
+                                                feedback_placeholder.empty()
+                                                show_feedback('success', "Check-In completado", duration=1)
+                                                
+                                                cache_mgr.invalidate('devices')
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                feedback_placeholder.empty()
+                                                show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
 
 # ============================================================
 # PANTALLA 5: INCIDENCIAS
@@ -1421,7 +1418,7 @@ elif st.session_state.menu == "Incidencias":
         # Obtener todos los dispositivos con incidencias
         devices_with_incidents = [device_map[did] for did in incidents_by_device.keys() if did in device_map]
         
-        # Usar el nuevo segmentador inteligente con color rojo para activas
+        # Segmentador fuera del contenedor
         devices_filtered, selected_group = smart_segmented_filter(
             devices_with_incidents, 
             key_prefix="incidents_filter",
@@ -1505,51 +1502,52 @@ elif st.session_state.menu == "Incidencias":
             current_page_incidents = all_incidents_list[start_idx:end_idx]
             
             # ============================================================
-            # MOSTRAR INCIDENCIAS DE LA PÁGINA ACTUAL
+            # MOSTRAR INCIDENCIAS DE LA PÁGINA ACTUAL (CON SCROLL)
             # ============================================================
             
-            for item in current_page_incidents:
-                inc = item["inc"]
-                dev_name = item["dev_name"]
-                inc_type = item["type"]
-                
-                if inc_type == "active":
-                    # ============================================================
-                    # INCIDENCIAS ACTIVAS (ROJO)
-                    # ============================================================
-                    notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
-                    created = fmt_datetime(inc.get("Created"))
+            with st.container(height=600, border=True):
+                for item in current_page_incidents:
+                    inc = item["inc"]
+                    dev_name = item["dev_name"]
+                    inc_type = item["type"]
+                    
+                    if inc_type == "active":
+                        # ============================================================
+                        # INCIDENCIAS ACTIVAS (ROJO)
+                        # ============================================================
+                        notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
+                        created = fmt_datetime(inc.get("Created"))
 
-                    cols = st.columns([8, 2])
-                    with cols[0]:
+                        cols = st.columns([8, 2])
+                        with cols[0]:
+                            st.markdown(
+                                f"""<div style='margin-left:20px;margin-bottom:10px;padding:8px;background:#FFEBEE;border-radius:4px;'><div style='display:flex;align-items:center;margin-bottom:4px;'><div style='width:10px;height:10px;background:#E53935;border-radius:50%;margin-right:8px;'></div><strong style='font-size:14px;color:#333;'>{dev_name}</strong><span style='margin:0 6px;color:#AAA;'>|</span><strong style='font-size:14px;color:#333;'>{inc['Name']}</strong><span style='margin-left:8px;color:#888;font-size:12px;'>{created}</span></div><div style='margin-left:18px;color:#666;font-size:13px;'>{notes if notes else '<em>Sin notas</em>'}</div></div>""",
+                                unsafe_allow_html=True
+                            )
+
+                        with cols[1]:
+                            if st.button("Resolver", key=f"resolve_{inc['id']}", use_container_width=True):
+                                st.session_state.solve_inc = inc
+                                st.rerun()
+                    
+                    else:
+                        # ============================================================
+                        # INCIDENCIAS PASADAS (GRIS)
+                        # ============================================================
+                        notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
+                        created = fmt_datetime(inc.get("Created"))
+                        resolved = fmt_datetime(inc.get("Resolved"))
+
+                        rnotes = inc.get("ResolutionNotes", "")
+                        rnotes_html = ""
+                        if rnotes:
+                            rnotes = rnotes.replace("<", "&lt;").replace(">", "&gt;")
+                            rnotes_html = f"<div style='margin-left:18px;color:#4CAF50;font-size:13px;margin-top:4px;'>{rnotes}</div>"
+
                         st.markdown(
-                            f"""<div style='margin-left:20px;margin-bottom:10px;padding:8px;background:#FFEBEE;border-radius:4px;'><div style='display:flex;align-items:center;margin-bottom:4px;'><div style='width:10px;height:10px;background:#E53935;border-radius:50%;margin-right:8px;'></div><strong style='font-size:14px;color:#333;'>{dev_name}</strong><span style='margin:0 6px;color:#AAA;'>|</span><strong style='font-size:14px;color:#333;'>{inc['Name']}</strong><span style='margin-left:8px;color:#888;font-size:12px;'>{created}</span></div><div style='margin-left:18px;color:#666;font-size:13px;'>{notes if notes else '<em>Sin notas</em>'}</div></div>""",
+                            f"""<div style='margin-left:20px;margin-bottom:10px;padding:8px;background:#F5F5F5;border-radius:4px;'><div style='display:flex;align-items:center;margin-bottom:4px;'><div style='width:10px;height:10px;background:#9E9E9E;border-radius:50%;margin-right:8px;'></div><strong style='font-size:14px;color:#555;'>{dev_name}</strong><span style='margin:0 6px;color:#AAA;'>|</span><strong style='font-size:14px;color:#555;'>{inc['Name']}</strong><span style='margin-left:8px;color:#888;font-size:12px;'>Creada: {created} → Resuelta: {resolved}</span></div><div style='margin-left:18px;color:#666;font-size:13px;'>{notes if notes else '<em>Sin notas</em>'}</div>{rnotes_html}</div>""",
                             unsafe_allow_html=True
                         )
-
-                    with cols[1]:
-                        if st.button("Resolver", key=f"resolve_{inc['id']}", use_container_width=True):
-                            st.session_state.solve_inc = inc
-                            st.rerun()
-                
-                else:
-                    # ============================================================
-                    # INCIDENCIAS PASADAS (GRIS)
-                    # ============================================================
-                    notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
-                    created = fmt_datetime(inc.get("Created"))
-                    resolved = fmt_datetime(inc.get("Resolved"))
-
-                    rnotes = inc.get("ResolutionNotes", "")
-                    rnotes_html = ""
-                    if rnotes:
-                        rnotes = rnotes.replace("<", "&lt;").replace(">", "&gt;")
-                        rnotes_html = f"<div style='margin-left:18px;color:#4CAF50;font-size:13px;margin-top:4px;'>{rnotes}</div>"
-
-                    st.markdown(
-                        f"""<div style='margin-left:20px;margin-bottom:10px;padding:8px;background:#F5F5F5;border-radius:4px;'><div style='display:flex;align-items:center;margin-bottom:4px;'><div style='width:10px;height:10px;background:#9E9E9E;border-radius:50%;margin-right:8px;'></div><strong style='font-size:14px;color:#555;'>{dev_name}</strong><span style='margin:0 6px;color:#AAA;'>|</span><strong style='font-size:14px;color:#555;'>{inc['Name']}</strong><span style='margin-left:8px;color:#888;font-size:12px;'>Creada: {created} → Resuelta: {resolved}</span></div><div style='margin-left:18px;color:#666;font-size:13px;'>{notes if notes else '<em>Sin notas</em>'}</div>{rnotes_html}</div>""",
-                        unsafe_allow_html=True
-                    )
             
             # ============================================================
             # PAGINADOR CON NÚMEROS (ABAJO A LA DERECHA)
@@ -1749,28 +1747,30 @@ elif st.session_state.menu == "Incidencias":
             if d.get("location_ids") and len(d["location_ids"]) > 0
         ]
 
-        # Usar el nuevo segmentador inteligente
+        # Segmentador fuera del contenedor
         devices_filtered_new, _ = smart_segmented_filter(devices_with_location, key_prefix="new_inc")
 
         sel_keys = []
 
-        for d in devices_filtered_new:
-            key = f"newinc_{d['id']}"
-            sel_keys.append(key)
+        # Contenedor con scroll
+        with st.container(height=500, border=True):
+            for d in devices_filtered_new:
+                key = f"newinc_{d['id']}"
+                sel_keys.append(key)
 
-            cols = st.columns([0.5, 9.5])
+                cols = st.columns([0.5, 9.5])
 
-            with cols[0]:
-                st.checkbox("", key=key)
+                with cols[0]:
+                    st.checkbox("", key=key)
 
-            with cols[1]:
-                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                subtitle = get_location_types_for_device(d, locations_map)
-                card(
-                    d["Name"],
-                    location_types=subtitle,
-                    incident_counts=(inc["active"], inc["total"])
-                )
+                with cols[1]:
+                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                    subtitle = get_location_types_for_device(d, locations_map)
+                    card(
+                        d["Name"],
+                        location_types=subtitle,
+                        incident_counts=(inc["active"], inc["total"])
+                    )
 
         selected_devices = [
             key.split("_")[1] for key in sel_keys if st.session_state.get(key, False)
