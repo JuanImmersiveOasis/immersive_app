@@ -948,7 +948,7 @@ incidence_map = load_incidence_map()
 
 if st.session_state.menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
-     # Botón de leyenda alineado a la derecha
+    # Botón de leyenda alineado a la derecha
     legend_button()
     
     c1, c2 = st.columns(2)
@@ -1039,27 +1039,26 @@ if st.session_state.menu == "Disponibles para Alquilar":
                                             if resp.status_code == 200:
                                                 success_count += 1
                                         
+                                        # Limpiar selección
                                         st.session_state.sel1 = []
                                         for key in list(st.session_state.keys()):
                                             if key.startswith("a_"):
                                                 del st.session_state[key]
                                         
+                                        # Borrar TODOS los cachés
+                                        cache_mgr.clear_all()
+                                        
+                                        # Mostrar feedback
                                         feedback_placeholder.empty()
                                         show_feedback('success', f"{success_count} dispositivos asignados correctamente", duration=1.5)
                                         
-                                        cache_mgr.invalidate('devices', 'future_locations')
+                                        # Esperar y recargar
                                         time.sleep(1.5)
                                         st.rerun()
                                     else:
                                         feedback_placeholder.empty()
                                         show_feedback('error', f"Error al crear ubicación: {response.status_code}", duration=3)
 
-# ============================================================
-# PANTALLA 2: GAFAS EN CASA
-# ============================================================
-# ============================================================
-# PANTALLA 2: GAFAS EN CASA
-# ============================================================
 # ============================================================
 # PANTALLA 2: GAFAS EN CASA
 # ============================================================
@@ -1226,7 +1225,7 @@ elif st.session_state.menu == "Gafas en casa":
     
     if not expander_office_open:
         st.session_state.expander_office_open = False
-        
+
 # ============================================================
 # PANTALLA 3: PRÓXIMOS ENVÍOS
 # ============================================================
@@ -1290,12 +1289,18 @@ elif st.session_state.menu == "Próximos Envíos":
                                             resp = assign_device(d["id"], office_id())
                                             
                                             if resp.status_code == 200:
-                                                feedback_placeholder.empty()
-                                                show_feedback('success', "Dispositivo quitado", duration=1)
+                                                # Borrar TODOS los cachés
+                                                cache_mgr.clear_all()
                                                 
-                                                cache_mgr.invalidate('devices', 'future_locations')
-                                                time.sleep(1)
+                                                # Mostrar feedback
+                                                feedback_placeholder.empty()
+                                                show_feedback('success', "Dispositivo quitado", duration=1.5)
+                                                
+                                                # Mantener expander abierto
                                                 st.session_state[expander_key] = True
+                                                
+                                                # Esperar y recargar
+                                                time.sleep(1.5)
                                                 st.rerun()
                                             else:
                                                 feedback_placeholder.empty()
@@ -1366,19 +1371,24 @@ elif st.session_state.menu == "Próximos Envíos":
                                             if resp.status_code == 200:
                                                 success_count += 1
                                         
+                                        # Limpiar checkboxes
                                         for key in checkbox_keys:
                                             if key in st.session_state:
                                                 del st.session_state[key]
                                         
-                                        feedback_placeholder.empty()
-                                        show_feedback('success', f"{success_count} dispositivos añadidos", duration=1)
+                                        # Borrar TODOS los cachés
+                                        cache_mgr.clear_all()
                                         
-                                        cache_mgr.invalidate('devices', 'future_locations')
-                                        
+                                        # Configurar estados de expanders
                                         st.session_state[expander_key] = True
                                         st.session_state[add_expander_key] = False
                                         
-                                        time.sleep(1)
+                                        # Mostrar feedback
+                                        feedback_placeholder.empty()
+                                        show_feedback('success', f"{success_count} dispositivos añadidos", duration=1.5)
+                                        
+                                        # Esperar y recargar
+                                        time.sleep(1.5)
                                         st.rerun()
                 
                 if not add_expanded:
@@ -1472,6 +1482,7 @@ elif st.session_state.menu == "Check-In":
                                 feedback_placeholder = st.empty()
                                 with feedback_placeholder:
                                     with st.spinner("Procesando Check-In..."):
+                                        # PASO 1: Crear registro en histórico
                                         payload = {
                                             "parent": {"database_id": HISTORIC_ID},
                                             "properties": {
@@ -1499,19 +1510,25 @@ elif st.session_state.menu == "Check-In":
                                             feedback_placeholder.empty()
                                             show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
                                         else:
+                                            # PASO 2: Mover dispositivo a oficina
                                             resp = assign_device(d["id"], office)
                                             
                                             if resp.status_code == 200:
-                                                feedback_placeholder.empty()
-                                                show_feedback('success', "Check-In completado", duration=1)
+                                                # PASO 3: Borrar TODOS los cachés
+                                                cache_mgr.clear_all()
                                                 
-                                                cache_mgr.invalidate('devices')
-                                                time.sleep(1)
+                                                # PASO 4: Mostrar feedback
+                                                feedback_placeholder.empty()
+                                                show_feedback('success', "Check-In completado", duration=1.5)
+                                                
+                                                # PASO 5: Esperar y recargar
+                                                time.sleep(1.5)
                                                 st.rerun()
                                             else:
                                                 feedback_placeholder.empty()
                                                 show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
 
+                                                
 # ============================================================
 # PANTALLA 5: INCIDENCIAS
 # ============================================================
