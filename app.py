@@ -39,6 +39,13 @@ headers = {
 }
 
 # ============================================================
+# ORDEN PREFERIDO DE TAGS
+# ============================================================
+# Esta lista define el orden en que queremos mostrar los tipos de gafas
+# Si aparece un tipo nuevo que no está aquí, se añadirá al final alfabéticamente
+PREFERRED_TAG_ORDER = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
+
+# ============================================================
 # CONTENEDOR PARA FEEDBACK EN SIDEBAR
 # ============================================================
 
@@ -581,39 +588,132 @@ def get_location_types_for_device(dev, loc_map):
     
     return "  ".join(uniq) if uniq else None
 
-def segmented_tag_filter(devices, tag_field="Tags", groups=None, key_prefix="seg"):
-    present_tags = sorted({(d.get(tag_field) or "") for d in devices if d.get(tag_field)})
+# ============================================================
+# SEGMENTADOR INTELIGENTE - FUNCIÓN HELPER PRINCIPAL
+# ============================================================
+
+def smart_segmented_filter(devices, key_prefix, tag_field="Tags", show_red_for_active=False, incidence_map=None):
+    """
+    Crea un segmentador inteligente que:
+    1. Detecta automáticamente qué tags existen en los dispositivos
+    2. Solo muestra botones de tags que tienen dispositivos
+    3. Ordena según PREFERRED_TAG_ORDER (tags nuevos al final alfabéticamente)
+    4. Opcionalmente muestra en rojo si hay incidencias activas
     
-    if groups is None:
-        groups = present_tags
+    Parámetros:
+    -----------
+    devices : list
+        Lista de dispositivos a filtrar
+    key_prefix : str
+        Prefijo único para el widget (ej: "tab1", "inhouse")
+    tag_field : str
+        Campo a usar para filtrar (por defecto "Tags")
+    show_red_for_active : bool
+        Si True, muestra en rojo el contador cuando hay incidencias activas
+    incidence_map : dict
+        Mapa de incidencias {device_id: {"active": n, "total": m}}
     
-    counts = {"Todas": len(devices)}
-    for g in groups:
-        counts[g] = sum(1 for d in devices if d.get(tag_field) == g)
+    Retorna:
+    --------
+    tuple : (devices_filtered, selected_group)
+        - devices_filtered: Lista de dispositivos del grupo seleccionado
+        - selected_group: Nombre del grupo seleccionado ("Todas" o nombre del tag)
+    """
     
-    opciones = {f"Todas ({counts['Todas']})": "Todas"}
-    for g in groups:
-        opciones[f"{g} ({counts[g]})"] = g
+    # PASO 1: Extraer todos los tags únicos que existen en los dispositivos
+    present_tags = {d.get(tag_field) for d in devices if d.get(tag_field)}
     
+    # PASO 2: Ordenar los tags según el orden preferido
+    # Los tags que están en PREFERRED_TAG_ORDER van primero en ese orden
+    # Los tags nuevos (no en la lista) se añaden al final alfabéticamente
+    ordered_tags = []
+    
+    # Añadir primero los tags conocidos que existen
+    for preferred_tag in PREFERRED_TAG_ORDER:
+        if preferred_tag in present_tags:
+            ordered_tags.append(preferred_tag)
+    
+    # Añadir tags nuevos que no están en la lista preferida
+    new_tags = sorted([tag for tag in present_tags if tag not in PREFERRED_TAG_ORDER])
+    ordered_tags.extend(new_tags)
+    
+    # PASO 3: Calcular contadores para cada grupo
+    if show_red_for_active and incidence_map:
+        # Para incidencias: contar activas y totales
+        counts_active = {"Todas": 0}
+        counts_total = {"Todas": 0}
+        
+        for tag in ordered_tags:
+            counts_active[tag] = 0
+            counts_total[tag] = 0
+        
+        for d in devices:
+            tag = d.get(tag_field)
+            inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+            
+            counts_active["Todas"] += inc["active"]
+            counts_total["Todas"] += inc["total"]
+            
+            if tag in counts_active:
+                counts_active[tag] += inc["active"]
+                counts_total[tag] += inc["total"]
+    else:
+        # Para dispositivos normales: contar cantidad
+        counts = {"Todas": len(devices)}
+        for tag in ordered_tags:
+            counts[tag] = sum(1 for d in devices if d.get(tag_field) == tag)
+    
+    # PASO 4: Crear opciones del segmentador
+    opciones_display = []
+    opciones_map = {}
+    
+    # Opción "Todas"
+    if show_red_for_active and incidence_map:
+        if counts_active["Todas"] > 0:
+            label_all = f"Todas :red[({counts_active['Todas']})]"
+        else:
+            label_all = f"Todas ({counts_active['Todas']})"
+    else:
+        label_all = f"Todas ({counts['Todas']})"
+    
+    opciones_display.append(label_all)
+    opciones_map[label_all] = "Todas"
+    
+    # Opciones por tag (solo los que existen)
+    for tag in ordered_tags:
+        if show_red_for_active and incidence_map:
+            if counts_active[tag] > 0:
+                label = f"{tag} :red[({counts_active[tag]})]"
+            else:
+                label = f"{tag} ({counts_active[tag]})"
+        else:
+            label = f"{tag} ({counts[tag]})"
+        
+        opciones_display.append(label)
+        opciones_map[label] = tag
+    
+    # PASO 5: Mostrar el segmentador
     sel_label = st.segmented_control(
         label=None,
-        options=list(opciones.keys()),
-        default=list(opciones.keys())[0],
+        options=opciones_display,
+        default=opciones_display[0],
         key=f"{key_prefix}_seg"
     )
     
-    if sel_label not in opciones:
-        sel_label = list(opciones.keys())[0]
+    # Validar selección
+    if sel_label not in opciones_map:
+        sel_label = opciones_display[0]
         st.session_state[f"{key_prefix}_seg"] = sel_label
     
-    selected_group = opciones[sel_label]
+    selected_group = opciones_map[sel_label]
     
+    # PASO 6: Filtrar dispositivos según la selección
     if selected_group == "Todas":
         filtered = devices
     else:
         filtered = [d for d in devices if d.get(tag_field) == selected_group]
     
-    return filtered, selected_group, counts, opciones
+    return filtered, selected_group
 
 # ============================================================
 # INICIALIZAR SESSION STATE
@@ -770,8 +870,8 @@ if st.session_state.menu == "Disponibles para Alquilar":
             if d.get("location_ids") and available(d, start, end)
         ]
         
-        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
-        avail_filtered, _, _, _ = segmented_tag_filter(avail, groups=groups, key_prefix="tab1")
+        # Usar el nuevo segmentador inteligente
+        avail_filtered, _ = smart_segmented_filter(avail, key_prefix="tab1")
         
         for d in avail_filtered:
             key = f"a_{d['id']}"
@@ -862,8 +962,6 @@ elif st.session_state.menu == "Gafas en casa":
     inh = load_inhouse()
     oid = office_id()
     
-    groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
-    
     with st.expander("Leyenda de estados"):
         render_legend()
     
@@ -875,9 +973,8 @@ elif st.session_state.menu == "Gafas en casa":
     ]
     
     with st.expander("Personal con dispositivos en casa", expanded=True):
-        inhouse_filtered, _, _, _ = segmented_tag_filter(
-            inhouse_devices, groups=groups, key_prefix="inhouse"
-        )
+        # Usar el nuevo segmentador inteligente
+        inhouse_filtered, _ = smart_segmented_filter(inhouse_devices, key_prefix="inhouse")
         
         people_devices = {p["id"]: [] for p in inh}
         for d in inhouse_filtered:
@@ -936,9 +1033,8 @@ elif st.session_state.menu == "Gafas en casa":
     with st.expander("Otras gafas disponibles en oficina", expanded=expander_office_open):
         st.session_state.expander_office_open = True
         
-        office_filtered, _, _, _ = segmented_tag_filter(
-            office_devices, groups=groups, key_prefix="office"
-        )
+        # Usar el nuevo segmentador inteligente
+        office_filtered, _ = smart_segmented_filter(office_devices, key_prefix="office")
         
         for d in office_filtered:
             key = f"o_{d['id']}"
@@ -1023,7 +1119,6 @@ elif st.session_state.menu == "Próximos Envíos":
             loc_id = loc["id"]
             
             devices = load_devices()
-            groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
             
             expander_key = f"expander_loc_{loc_id}"
             is_expanded = st.session_state.get(expander_key, False)
@@ -1038,9 +1133,8 @@ elif st.session_state.menu == "Próximos Envíos":
                 
                 st.subheader("Dispositivos asignados")
                 
-                assigned_filtered, _, _, _ = segmented_tag_filter(
-                    assigned, groups=groups, key_prefix=f"assigned_{loc_id}"
-                )
+                # Usar el nuevo segmentador inteligente
+                assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
                 
                 for d in assigned_filtered:
                     cols = st.columns([9, 1])
@@ -1090,9 +1184,8 @@ elif st.session_state.menu == "Próximos Envíos":
                         and loc_id not in d["location_ids"]
                     ]
                     
-                    can_add_filtered, _, _, _ = segmented_tag_filter(
-                        can_add, groups=groups, key_prefix=f"canadd_{loc_id}"
-                    )
+                    # Usar el nuevo segmentador inteligente
+                    can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
                     
                     checkbox_keys = []
                     
@@ -1227,7 +1320,7 @@ elif st.session_state.menu == "Check-In":
         
         with st.expander(f"Gafas para recepcionar ({len(assigned)})", expanded=True):
             for d in assigned:
-                cols = st.columns([9, 1])
+                cols = st.columns([8, 2])
                 
                 with cols[0]:
                     subtitle = get_location_types_for_device(d, locations_map)
@@ -1320,97 +1413,21 @@ elif st.session_state.menu == "Incidencias":
     total_active = sum(len(v["active"]) for v in incidents_by_device.values())
 
     # ============================================================
-    # EXPANDER 1 — LISTADO DE INCIDENCIAS (SIEMPRE ABIERTO)
+    # EXPANDER 1 – LISTADO DE INCIDENCIAS (SIEMPRE ABIERTO)
     # ============================================================
 
     with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=True):
         
-        # ============================================================
-        # SEGMENTADOR POR TIPO DE DISPOSITIVO (DENTRO DEL EXPANDER)
-        # ============================================================
-        
         # Obtener todos los dispositivos con incidencias
         devices_with_incidents = [device_map[did] for did in incidents_by_device.keys() if did in device_map]
         
-        # Calcular contadores por tipo de dispositivo
-        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
-        
-        # Contar TOTAL de incidencias (activas + pasadas) y si hay ACTIVAS por grupo
-        total_counts = {"Todas": 0}
-        active_counts = {"Todas": 0}
-        
-        for g in groups:
-            total_counts[g] = 0
-            active_counts[g] = 0
-        
-        for did, lists in incidents_by_device.items():
-            if did not in device_map:
-                continue
-            dev = device_map[did]
-            tag = dev.get("Tags")
-            
-            num_total = len(lists["active"]) + len(lists["past"])
-            num_active = len(lists["active"])
-            
-            total_counts["Todas"] += num_total
-            active_counts["Todas"] += num_active
-            
-            if tag in total_counts:
-                total_counts[tag] += num_total
-                active_counts[tag] += num_active
-        
-        # Crear opciones personalizadas con color rojo si hay incidencias activas
-        present_tags = sorted({d.get("Tags") for d in devices_with_incidents if d.get("Tags")})
-        
-        # Construir las opciones del segmentador
-        opciones_display = []
-        opciones_map = {}
-        
-        # Opción "Todas"
-        count_total_all = total_counts["Todas"]
-        count_active_all = active_counts["Todas"]
-        
-        if count_active_all > 0:
-            label_all = f"Todas :red[({count_active_all})]"
-        else:
-            label_all = f"Todas ({count_active_all})"
-        
-        opciones_display.append(label_all)
-        opciones_map[label_all] = "Todas"
-        
-        # Opciones por grupo
-        for g in groups:
-            if g in present_tags:
-                count_total = total_counts.get(g, 0)
-                count_active = active_counts.get(g, 0)
-                
-                if count_active > 0:
-                    label = f"{g} :red[({count_active})]"
-                else:
-                    label = f"{g} ({count_active})"
-                
-                opciones_display.append(label)
-                opciones_map[label] = g
-        
-        # Mostrar el segmentador
-        sel_label = st.segmented_control(
-            label=None,
-            options=opciones_display,
-            default=opciones_display[0],
-            key="incidents_filter_seg"
+        # Usar el nuevo segmentador inteligente con color rojo para activas
+        devices_filtered, selected_group = smart_segmented_filter(
+            devices_with_incidents, 
+            key_prefix="incidents_filter",
+            show_red_for_active=True,
+            incidence_map=incidence_map
         )
-        
-        if sel_label not in opciones_map:
-            sel_label = opciones_display[0]
-            st.session_state["incidents_filter_seg"] = sel_label
-        
-        selected_group = opciones_map[sel_label]
-        
-        # Filtrar dispositivos según el grupo seleccionado
-        if selected_group == "Todas":
-            devices_filtered = devices_with_incidents
-        else:
-            devices_filtered = [d for d in devices_with_incidents if d.get("Tags") == selected_group]
         
         # Filtrar incidents_by_device según los dispositivos filtrados
         filtered_device_ids = {d["id"] for d in devices_filtered}
@@ -1625,7 +1642,7 @@ elif st.session_state.menu == "Incidencias":
                                     st.rerun()
 
     # ============================================================
-    # SIDEBAR — RESOLVER INCIDENCIA
+    # SIDEBAR – RESOLVER INCIDENCIA
     # ============================================================
 
     if "solve_inc" not in st.session_state:
@@ -1719,14 +1736,12 @@ elif st.session_state.menu == "Incidencias":
                     st.rerun()
 
     # ============================================================
-    # EXPANDER 2 — AÑADIR NUEVA INCIDENCIA
+    # EXPANDER 2 – AÑADIR NUEVA INCIDENCIA
     # ============================================================
 
     add_new_expanded = st.session_state.get("add_new_incident_expander", False)
 
     with st.expander("Añadir nueva incidencia", expanded=add_new_expanded):
-
-        groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
 
         # Filtrar solo dispositivos con localización asignada (C, H o O)
         devices_with_location = [
@@ -1734,9 +1749,8 @@ elif st.session_state.menu == "Incidencias":
             if d.get("location_ids") and len(d["location_ids"]) > 0
         ]
 
-        devices_filtered_new, _, _, _ = segmented_tag_filter(
-            devices_with_location, groups=groups, key_prefix="new_inc"
-        )
+        # Usar el nuevo segmentador inteligente
+        devices_filtered_new, _ = smart_segmented_filter(devices_with_location, key_prefix="new_inc")
 
         sel_keys = []
 
