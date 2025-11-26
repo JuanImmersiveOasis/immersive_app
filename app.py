@@ -1351,9 +1351,9 @@ elif st.session_state.menu == "Incidencias":
         count_active_all = active_counts["Todas"]
         
         if count_active_all > 0:
-            label_all = f"Todas :red[({count_total_all})]"
+            label_all = f"Todas :red[({count_active_all})]"
         else:
-            label_all = f"Todas ({count_total_all})"
+            label_all = f"Todas ({count_active_all})"
         
         opciones_display.append(label_all)
         opciones_map[label_all] = "Todas"
@@ -1365,9 +1365,9 @@ elif st.session_state.menu == "Incidencias":
                 count_active = active_counts.get(g, 0)
                 
                 if count_active > 0:
-                    label = f"{g} :red[({count_total})]"
+                    label = f"{g} :red[({count_active})]"
                 else:
-                    label = f"{g} ({count_total})"
+                    label = f"{g} ({count_active})"
                 
                 opciones_display.append(label)
                 opciones_map[label] = g
@@ -1708,8 +1708,14 @@ elif st.session_state.menu == "Incidencias":
 
         groups = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
 
+        # Filtrar solo dispositivos con localización asignada (C, H o O)
+        devices_with_location = [
+            d for d in devices 
+            if d.get("location_ids") and len(d["location_ids"]) > 0
+        ]
+
         devices_filtered_new, _, _, _ = segmented_tag_filter(
-            devices, groups=groups, key_prefix="new_inc"
+            devices_with_location, groups=groups, key_prefix="new_inc"
         )
 
         sel_keys = []
