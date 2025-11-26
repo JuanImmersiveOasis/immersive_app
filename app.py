@@ -859,8 +859,6 @@ with st.sidebar:
     # Logo completo que ocupa todo el ancho
     st.image("img/logo.png", use_container_width=True)
     
-    st.markdown("---")
-    
     try:
         num_proximos = len(load_future_client_locations())
     except:
@@ -902,7 +900,7 @@ with st.sidebar:
     except:
         num_incidencias = 0
     
-    st.markdown("### Navegación")
+    st.markdown("---")
     
     def create_menu_label(text, count=0):
         if count > 0:
@@ -1432,8 +1430,6 @@ elif st.session_state.menu == "Check-In":
         office = office_id()
         
         with st.expander(f"Gafas para recepcionar ({len(assigned)})", expanded=True):
-            # Botón de leyenda
-            legend_button()
             
             # Contenedor con scroll
             with st.container(border=False):
