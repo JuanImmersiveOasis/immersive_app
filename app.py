@@ -1261,51 +1261,84 @@ elif st.session_state.menu == "Próximos Envíos":
                     if loc_id in d["location_ids"]
                 ]
                 
-                st.subheader("Dispositivos asignados")
-                
-                # Segmentador fuera del contenedor
-                assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
-                
-                # Contenedor con scroll
-                with st.container(border=False):
-                    for d in assigned_filtered:
-                        cols = st.columns([8, 2])
-                        
-                        with cols[0]:
-                            subtitle = get_location_types_for_device(d, locations_map)
-                            inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                            card(
-                                d["Name"],
-                                location_types=subtitle,
-                                incident_counts=(inc["active"], inc["total"])
-                            )
-                        
-                        with cols[1]:
-                            if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
-                                with st.sidebar:
-                                    feedback_placeholder = st.empty()
-                                    with feedback_placeholder:
-                                        with st.spinner("Quitando dispositivo..."):
-                                            resp = assign_device(d["id"], office_id())
-                                            
-                                            if resp.status_code == 200:
-                                                # Borrar TODOS los cachés
-                                                cache_mgr.clear_all()
+                # SI NO HAY DISPOSITIVOS ASIGNADOS, MOSTRAR ADVERTENCIA Y BOTÓN DE BORRAR
+                if len(assigned) == 0:
+                    st.warning("Este envío no tiene dispositivos asignados")
+                    
+                    if st.button("Borrar envío", key=f"delete_loc_{loc_id}", use_container_width=True):
+                        with st.sidebar:
+                            feedback_placeholder = st.empty()
+                            with feedback_placeholder:
+                                with st.spinner("Eliminando envío..."):
+                                    # Archivar (borrar) el location en Notion
+                                    delete_response = requests.patch(
+                                        f"https://api.notion.com/v1/pages/{loc_id}",
+                                        headers=headers,
+                                        json={"archived": True}
+                                    )
+                                    
+                                    if delete_response.status_code == 200:
+                                        # Borrar TODOS los cachés
+                                        cache_mgr.clear_all()
+                                        
+                                        # Mostrar feedback
+                                        feedback_placeholder.empty()
+                                        show_feedback('success', f"Envío '{lname}' eliminado", duration=1.5)
+                                        
+                                        # Esperar y recargar
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        feedback_placeholder.empty()
+                                        show_feedback('error', f"Error al eliminar: {delete_response.status_code}", duration=3)
+                else:
+                    # SI HAY DISPOSITIVOS, MOSTRAR LA LISTA
+                    st.subheader("Dispositivos asignados")
+                    
+                    # Segmentador fuera del contenedor
+                    assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
+                    
+                    # Contenedor con scroll
+                    with st.container(border=False):
+                        for d in assigned_filtered:
+                            cols = st.columns([8, 2])
+                            
+                            with cols[0]:
+                                subtitle = get_location_types_for_device(d, locations_map)
+                                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                card(
+                                    d["Name"],
+                                    location_types=subtitle,
+                                    incident_counts=(inc["active"], inc["total"])
+                                )
+                            
+                            with cols[1]:
+                                if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
+                                    with st.sidebar:
+                                        feedback_placeholder = st.empty()
+                                        with feedback_placeholder:
+                                            with st.spinner("Quitando dispositivo..."):
+                                                resp = assign_device(d["id"], office_id())
                                                 
-                                                # Mostrar feedback
-                                                feedback_placeholder.empty()
-                                                show_feedback('success', "Dispositivo quitado", duration=1.5)
-                                                
-                                                # Mantener expander abierto
-                                                st.session_state[expander_key] = True
-                                                
-                                                # Esperar y recargar
-                                                time.sleep(1.5)
-                                                st.rerun()
-                                            else:
-                                                feedback_placeholder.empty()
-                                                show_feedback('error', f"Error: {resp.status_code}", duration=2)
+                                                if resp.status_code == 200:
+                                                    # Borrar TODOS los cachés
+                                                    cache_mgr.clear_all()
+                                                    
+                                                    # Mostrar feedback
+                                                    feedback_placeholder.empty()
+                                                    show_feedback('success', "Dispositivo quitado", duration=1.5)
+                                                    
+                                                    # Mantener expander abierto
+                                                    st.session_state[expander_key] = True
+                                                    
+                                                    # Esperar y recargar
+                                                    time.sleep(1.5)
+                                                    st.rerun()
+                                                else:
+                                                    feedback_placeholder.empty()
+                                                    show_feedback('error', f"Error: {resp.status_code}", duration=2)
                 
+                # EXPANDER PARA AÑADIR GAFAS (SIEMPRE SE MUESTRA)
                 add_expander_key = f"add_expander_{loc_id}"
                 add_expanded = st.session_state.get(add_expander_key, False)
                 
@@ -1528,13 +1561,18 @@ elif st.session_state.menu == "Check-In":
                                                 feedback_placeholder.empty()
                                                 show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
 
-                                                
+
 # ============================================================
 # PANTALLA 5: INCIDENCIAS
 # ============================================================
 
 elif st.session_state.menu == "Incidencias":
     st.title("Incidencias de dispositivos")
+    
+    # FORZAR VOLVER A INCIDENCIAS SI SE RECARGÓ DESDE UN BOTÓN
+    if "force_incidents_tab" in st.session_state and st.session_state.force_incidents_tab:
+        st.session_state.menu = "Incidencias"
+        st.session_state.force_incidents_tab = False
     
     # Cargar incidencias
     actives = load_active_incidents()
@@ -1660,7 +1698,7 @@ elif st.session_state.menu == "Incidencias":
             # MOSTRAR INCIDENCIAS DE LA PÁGINA ACTUAL (CON SCROLL)
             # ============================================================
             
-            with st.container( border=True):
+            with st.container(border=True):
                 for item in current_page_incidents:
                     inc = item["inc"]
                     dev_name = item["dev_name"]
@@ -1849,7 +1887,7 @@ elif st.session_state.menu == "Incidencias":
                                     "rich_text": [{"text": {"content": rnotes}}]
                                 }
 
-                            # Crear en PAST
+                            # PASO 1: Crear en PAST
                             r1 = requests.post(
                                 "https://api.notion.com/v1/pages",
                                 headers=headers,
@@ -1857,7 +1895,7 @@ elif st.session_state.menu == "Incidencias":
                             )
 
                             if r1.status_code == 200:
-                                # Archivar active
+                                # PASO 2: Archivar active
                                 r2 = requests.patch(
                                     f"https://api.notion.com/v1/pages/{inc['id']}",
                                     headers=headers,
@@ -1865,25 +1903,31 @@ elif st.session_state.menu == "Incidencias":
                                 )
 
                                 if r2.status_code == 200:
+                                    # PASO 3: Limpiar estado
                                     st.session_state.solve_inc = None
                                     st.session_state.add_new_incident_expander = False
 
-                                    cache_mgr.invalidate(
-                                        "active_incidents", "past_incidents", "incidence_map"
-                                    )
+                                    # PASO 4: Marcar que debe volver a Incidencias
+                                    st.session_state.force_incidents_tab = True
+                                    
+                                    # PASO 5: Borrar TODOS los cachés
+                                    cache_mgr.clear_all()
 
+                                    # PASO 6: Mostrar feedback
                                     feedback.empty()
-                                    show_feedback("success", "Incidencia resuelta", duration=1)
-                                    time.sleep(1)
+                                    show_feedback("success", "Incidencia resuelta", duration=1.5)
+                                    
+                                    # PASO 7: Esperar y recargar
+                                    time.sleep(1.5)
                                     st.rerun()
 
                                 else:
                                     feedback.empty()
-                                    show_feedback("error", f"Error al archivar incidencia: {r2.status_code}")
+                                    show_feedback("error", f"Error al archivar incidencia: {r2.status_code}", duration=3)
 
                             else:
                                 feedback.empty()
-                                show_feedback("error", f"Error al crear incidencia resuelta: {r1.status_code}")
+                                show_feedback("error", f"Error al crear incidencia resuelta: {r1.status_code}", duration=3)
 
             with col2:
                 if st.button("Cancelar", use_container_width=True):
@@ -1974,30 +2018,37 @@ elif st.session_state.menu == "Incidencias":
                                     if r.status_code != 200:
                                         ok = False
                                         feedback.empty()
-                                        show_feedback("error", f"Error: {r.status_code}")
+                                        show_feedback("error", f"Error: {r.status_code}", duration=3)
                                         break
 
                                 if ok:
-                                    # Limpiar checkboxes
+                                    # PASO 1: Limpiar checkboxes
                                     for key in sel_keys:
-                                        st.session_state[key] = False
+                                        if key in st.session_state:
+                                            del st.session_state[key]
 
-                                    # Borrar formulario
+                                    # PASO 2: Borrar formulario
                                     if "new_inc_name" in st.session_state:
                                         del st.session_state["new_inc_name"]
                                     if "new_inc_notes" in st.session_state:
                                         del st.session_state["new_inc_notes"]
 
+                                    # PASO 3: Cerrar expander
                                     st.session_state.add_new_incident_expander = False
                                     
-                                    # Resetear página a 1 cuando se crean nuevas incidencias
+                                    # PASO 4: Resetear página a 1
                                     st.session_state.incidents_current_page = 1
 
-                                    cache_mgr.invalidate(
-                                        "active_incidents", "past_incidents", "incidence_map"
-                                    )
+                                    # PASO 5: Marcar que debe volver a Incidencias
+                                    st.session_state.force_incidents_tab = True
+                                    
+                                    # PASO 6: Borrar TODOS los cachés
+                                    cache_mgr.clear_all()
 
+                                    # PASO 7: Mostrar feedback
                                     feedback.empty()
-                                    show_feedback("success", "Incidencia creada", duration=1)
-                                    time.sleep(1)
+                                    show_feedback("success", "Incidencia creada", duration=1.5)
+                                    
+                                    # PASO 8: Esperar y recargar
+                                    time.sleep(1.5)
                                     st.rerun()
