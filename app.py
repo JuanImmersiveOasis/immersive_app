@@ -775,16 +775,17 @@ with st.sidebar:
         opciones_menu[4]: "Incidencias"
     }
     
-    current_menu = st.session_state.get("menu", "Disponibles para Alquilar")
     reverse_mapping = {v: k for k, v in menu_mapping.items()}
-    default_label = reverse_mapping.get(current_menu, opciones_menu[0])
+    
+    if "force_incidents_tab" in st.session_state and st.session_state.get("force_incidents_tab"):
+        if "nav_radio" in st.session_state:
+            st.session_state.nav_radio = reverse_mapping["Incidencias"]
     
     selected_label = st.radio(
         label="nav",
         options=opciones_menu,
         label_visibility="collapsed",
-        key="nav_radio",
-        index=opciones_menu.index(default_label)
+        key="nav_radio"
     )
     
     st.session_state.menu = menu_mapping[selected_label]
