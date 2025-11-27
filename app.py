@@ -7,14 +7,8 @@ import time
 
 load_dotenv()
 
-# ============================================================
-# CONFIGURACIÓN INICIAL
-# ============================================================
 st.set_page_config(page_title="Logistica", page_icon=None, layout="wide")
 
-# ============================================================
-# CREDENCIALES Y CONFIGURACIÓN DE NOTION
-# ============================================================
 try:
     NOTION_TOKEN = st.secrets["NOTION_TOKEN"]
 except:
@@ -38,22 +32,9 @@ headers = {
     "Notion-Version": NOTION_VERSION,
 }
 
-# ============================================================
-# ORDEN PREFERIDO DE TAGS
-# ============================================================
-# Esta lista define el orden en que queremos mostrar los tipos de gafas
-# Si aparece un tipo nuevo que no está aquí, se añadirá al final alfabéticamente
 PREFERRED_TAG_ORDER = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
 
-# ============================================================
-# CONTENEDOR PARA FEEDBACK EN SIDEBAR
-# ============================================================
-
 def show_feedback(message_type, message, duration=None):
-    """
-    Muestra feedback en el sidebar con ancho completo
-    message_type: 'success', 'error', 'warning', 'info', 'spinner'
-    """
     with st.sidebar:
         placeholder = st.empty()
         
@@ -76,46 +57,6 @@ def show_feedback(message_type, message, duration=None):
         
         return placeholder
 
-# ============================================================
-# SISTEMA DE CACHÉ MEJORADO CON TTL
-# ============================================================
-
-class CacheManager:
-    def __init__(self):
-        if 'cache_store' not in st.session_state:
-            st.session_state.cache_store = {}
-    
-    def get(self, key, default=None):
-        cache = st.session_state.cache_store.get(key)
-        if not cache:
-            return default
-        elapsed = time.time() - cache['timestamp']
-        if elapsed > cache['ttl']:
-            del st.session_state.cache_store[key]
-            return default
-        return cache['data']
-    
-    def set(self, key, data, ttl=300):
-        st.session_state.cache_store[key] = {
-            'data': data,
-            'timestamp': time.time(),
-            'ttl': ttl
-        }
-    
-    def invalidate(self, *keys):
-        for key in keys:
-            if key in st.session_state.cache_store:
-                del st.session_state.cache_store[key]
-    
-    def clear_all(self):
-        st.session_state.cache_store = {}
-
-cache_mgr = CacheManager()
-
-# ============================================================
-# FUNCIONES AUXILIARES
-# ============================================================
-
 def iso_to_date(s):
     try:
         return datetime.fromisoformat(s).date()
@@ -136,16 +77,10 @@ def fmt_datetime(date_str):
     except:
         return date_str if date_str else "Sin fecha"
 
-def q(db, payload=None, use_cache=True, cache_ttl=300):
+@st.cache_data(ttl=300)
+def q(db, payload=None):
     if payload is None:
         payload = {"page_size": 100}
-    
-    cache_key = f"query_{db}_{str(payload)}"
-    
-    if use_cache:
-        cached = cache_mgr.get(cache_key)
-        if cached is not None:
-            return cached
     
     url = f"https://api.notion.com/v1/databases/{db}/query"
     results = []
@@ -173,9 +108,6 @@ def q(db, payload=None, use_cache=True, cache_ttl=300):
         if not next_cursor:
             break
     
-    if use_cache:
-        cache_mgr.set(cache_key, results, ttl=cache_ttl)
-    
     return results
 
 def available(dev, start, end):
@@ -198,18 +130,13 @@ def assign_device(dev_id, loc_id):
         json={"properties": {"Location": {"relation": [{"id": loc_id}]}}},
         headers=headers
     )
-    cache_mgr.invalidate('devices', 'future_locations', 'inhouse')
+    load_devices.clear()
+    load_future_client_locations.clear()
+    q.clear()
+    preload_all_data.clear()
     return response
 
-# ============================================================
-# COMPONENTES DE UI
-# ============================================================
-
 def legend_button():
-    """
-    Crea un botón de ayuda (?) que muestra la leyenda al hacer hover
-    Se coloca alineado a la derecha
-    """
     st.markdown(
         '''
         <style>
@@ -387,7 +314,6 @@ def card(name, location_types=None, selected=False, incident_counts=None):
         active, total = incident_counts
         
         if active > 0:
-            # Si hay incidencias activas, cambiar borde y color de texto a rojo
             border_color = "#E53935"
             text_color = "#E53935"
             
@@ -435,16 +361,9 @@ def counter_badge(selected, total):
         unsafe_allow_html=True
     )
 
-# ============================================================
-# FUNCIONES DE CARGA DE DATOS
-# ============================================================
-
+@st.cache_data(ttl=600)
 def load_locations_map():
-    cached = cache_mgr.get('locations_map')
-    if cached is not None:
-        return cached
-    
-    results = q(LOCATIONS_ID, cache_ttl=600)
+    results = q(LOCATIONS_ID)
     out = {}
     
     for p in results:
@@ -463,22 +382,20 @@ def load_locations_map():
         
         out[pid] = {"name": name, "type": t}
     
-    cache_mgr.set('locations_map', out, ttl=600)
     return out
 
+@st.cache_data(ttl=300)
 def load_devices():
-    cached = cache_mgr.get('devices')
-    if cached is not None:
-        return cached
-    
-    results = q(DEVICES_ID, cache_ttl=300)
+    results = q(DEVICES_ID)
     out = []
     
     for p in results:
         props = p["properties"]
         
         name = props["Name"]["title"][0]["text"]["content"] if props["Name"]["title"] else "Sin nombre"
+        
         tag = props["Tags"]["select"]["name"] if props.get("Tags") and props["Tags"]["select"] else None
+        
         locs = [r["id"] for r in props["Location"]["relation"]] if props.get("Location") and props["Location"]["relation"] else []
         
         try:
@@ -507,16 +424,12 @@ def load_devices():
         })
     
     out = sorted(out, key=lambda x: x["Name"])
-    cache_mgr.set('devices', out, ttl=300)
     return out
 
+@st.cache_data(ttl=300)
 def load_future_client_locations():
-    cached = cache_mgr.get('future_locations')
-    if cached is not None:
-        return cached
-    
     today = date.today()
-    results = q(LOCATIONS_ID, cache_ttl=300)
+    results = q(LOCATIONS_ID)
     out = []
     
     for p in results:
@@ -548,15 +461,11 @@ def load_future_client_locations():
             "end": ed
         })
     
-    cache_mgr.set('future_locations', out, ttl=300)
     return out
 
+@st.cache_data(ttl=600)
 def load_inhouse():
-    cached = cache_mgr.get('inhouse')
-    if cached is not None:
-        return cached
-    
-    results = q(LOCATIONS_ID, {"filter": {"property": "Type", "select": {"equals": "In House"}}}, cache_ttl=600)
+    results = q(LOCATIONS_ID, {"filter": {"property": "Type", "select": {"equals": "In House"}}})
     out = []
     
     for p in results:
@@ -567,26 +476,17 @@ def load_inhouse():
         
         out.append({"id": p["id"], "name": name})
     
-    cache_mgr.set('inhouse', out, ttl=600)
     return out
 
+@st.cache_data(ttl=600)
 def office_id():
-    cached = cache_mgr.get('office_id')
-    if cached is not None:
-        return cached
-    
-    r = q(LOCATIONS_ID, {"filter": {"property": "Name", "title": {"equals": "Office"}}}, cache_ttl=600)
+    r = q(LOCATIONS_ID, {"filter": {"property": "Name", "title": {"equals": "Office"}}})
     oid = r[0]["id"] if r else None
-    
-    cache_mgr.set('office_id', oid, ttl=600)
     return oid
 
+@st.cache_data(ttl=180)
 def load_active_incidents():
-    cached = cache_mgr.get('active_incidents')
-    if cached is not None:
-        return cached
-    
-    r = q(ACTIVE_INC_ID, cache_ttl=180)
+    r = q(ACTIVE_INC_ID)
     out = []
     
     for p in r:
@@ -615,15 +515,11 @@ def load_active_incidents():
             "Notes": notes
         })
     
-    cache_mgr.set('active_incidents', out, ttl=180)
     return out
 
+@st.cache_data(ttl=300)
 def load_past_incidents():
-    cached = cache_mgr.get('past_incidents')
-    if cached is not None:
-        return cached
-    
-    r = q(PAST_INC_ID, cache_ttl=300)
+    r = q(PAST_INC_ID)
     out = []
     
     for p in r:
@@ -659,14 +555,10 @@ def load_past_incidents():
             "ResolutionNotes": rnotes
         })
     
-    cache_mgr.set('past_incidents', out, ttl=300)
     return out
 
+@st.cache_data(ttl=180)
 def load_incidence_map():
-    cached = cache_mgr.get('incidence_map')
-    if cached is not None:
-        return cached
-    
     active = load_active_incidents()
     past = load_past_incidents()
     
@@ -689,7 +581,6 @@ def load_incidence_map():
             m[did] = {"active": 0, "total": 0}
         m[did]["total"] += 1
     
-    cache_mgr.set('incidence_map', m, ttl=180)
     return m
 
 def get_location_types_for_device(dev, loc_map):
@@ -708,58 +599,19 @@ def get_location_types_for_device(dev, loc_map):
     
     return "  ".join(uniq) if uniq else None
 
-# ============================================================
-# SEGMENTADOR INTELIGENTE - FUNCIÓN HELPER PRINCIPAL
-# ============================================================
-
 def smart_segmented_filter(devices, key_prefix, tag_field="Tags", show_red_for_active=False, incidence_map=None):
-    """
-    Crea un segmentador inteligente que:
-    1. Detecta automáticamente qué tags existen en los dispositivos
-    2. Solo muestra botones de tags que tienen dispositivos
-    3. Ordena según PREFERRED_TAG_ORDER (tags nuevos al final alfabéticamente)
-    4. Opcionalmente muestra en rojo si hay incidencias activas
-    
-    Parámetros:
-    -----------
-    devices : list
-        Lista de dispositivos a filtrar
-    key_prefix : str
-        Prefijo único para el widget (ej: "tab1", "inhouse")
-    tag_field : str
-        Campo a usar para filtrar (por defecto "Tags")
-    show_red_for_active : bool
-        Si True, muestra en rojo el contador cuando hay incidencias activas
-    incidence_map : dict
-        Mapa de incidencias {device_id: {"active": n, "total": m}}
-    
-    Retorna:
-    --------
-    tuple : (devices_filtered, selected_group)
-        - devices_filtered: Lista de dispositivos del grupo seleccionado
-        - selected_group: Nombre del grupo seleccionado ("Todas" o nombre del tag)
-    """
-    
-    # PASO 1: Extraer todos los tags únicos que existen en los dispositivos
     present_tags = {d.get(tag_field) for d in devices if d.get(tag_field)}
     
-    # PASO 2: Ordenar los tags según el orden preferido
-    # Los tags que están en PREFERRED_TAG_ORDER van primero en ese orden
-    # Los tags nuevos (no en la lista) se añaden al final alfabéticamente
     ordered_tags = []
     
-    # Añadir primero los tags conocidos que existen
     for preferred_tag in PREFERRED_TAG_ORDER:
         if preferred_tag in present_tags:
             ordered_tags.append(preferred_tag)
     
-    # Añadir tags nuevos que no están en la lista preferida
     new_tags = sorted([tag for tag in present_tags if tag not in PREFERRED_TAG_ORDER])
     ordered_tags.extend(new_tags)
     
-    # PASO 3: Calcular contadores para cada grupo
     if show_red_for_active and incidence_map:
-        # Para incidencias: contar activas y totales
         counts_active = {"Todas": 0}
         counts_total = {"Todas": 0}
         
@@ -778,16 +630,13 @@ def smart_segmented_filter(devices, key_prefix, tag_field="Tags", show_red_for_a
                 counts_active[tag] += inc["active"]
                 counts_total[tag] += inc["total"]
     else:
-        # Para dispositivos normales: contar cantidad
         counts = {"Todas": len(devices)}
         for tag in ordered_tags:
             counts[tag] = sum(1 for d in devices if d.get(tag_field) == tag)
     
-    # PASO 4: Crear opciones del segmentador
     opciones_display = []
     opciones_map = {}
     
-    # Opción "Todas"
     if show_red_for_active and incidence_map:
         if counts_active["Todas"] > 0:
             label_all = f"Todas :red[({counts_active['Todas']})]"
@@ -799,7 +648,6 @@ def smart_segmented_filter(devices, key_prefix, tag_field="Tags", show_red_for_a
     opciones_display.append(label_all)
     opciones_map[label_all] = "Todas"
     
-    # Opciones por tag (solo los que existen)
     for tag in ordered_tags:
         if show_red_for_active and incidence_map:
             if counts_active[tag] > 0:
@@ -812,7 +660,6 @@ def smart_segmented_filter(devices, key_prefix, tag_field="Tags", show_red_for_a
         opciones_display.append(label)
         opciones_map[label] = tag
     
-    # PASO 5: Mostrar el segmentador
     sel_label = st.segmented_control(
         label=None,
         options=opciones_display,
@@ -820,14 +667,12 @@ def smart_segmented_filter(devices, key_prefix, tag_field="Tags", show_red_for_a
         key=f"{key_prefix}_seg"
     )
     
-    # Validar selección
     if sel_label not in opciones_map:
         sel_label = opciones_display[0]
         st.session_state[f"{key_prefix}_seg"] = sel_label
     
     selected_group = opciones_map[sel_label]
     
-    # PASO 6: Filtrar dispositivos según la selección
     if selected_group == "Todas":
         filtered = devices
     else:
@@ -835,38 +680,48 @@ def smart_segmented_filter(devices, key_prefix, tag_field="Tags", show_red_for_a
     
     return filtered, selected_group
 
-# ============================================================
-# INICIALIZAR SESSION STATE
-# ============================================================
+@st.cache_data(ttl=180)
+def preload_all_data():
+    data = {
+        'locations_map': load_locations_map(),
+        'devices': load_devices(),
+        'future_locations': load_future_client_locations(),
+        'inhouse': load_inhouse(),
+        'office_id': office_id(),
+        'active_incidents': load_active_incidents(),
+        'past_incidents': load_past_incidents(),
+        'incidence_map': load_incidence_map(),
+        'all_locations': q(LOCATIONS_ID)
+    }
+    return data
 
 for key, default in [
-    ("tab1_show", False), 
-    ("sel1", []), 
+    ("tab1_show", False),
+    ("sel1", []),
     ("sel2", []),
-    ("sel3", []), 
-    ("tab3_loc", None), 
+    ("sel3", []),
+    ("tab3_loc", None),
     ("show_avail_tab3", False),
     ("show_avail_home", False)
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
 
-# ============================================================
-# SIDEBAR - NAVEGACIÓN
-# ============================================================
+with st.spinner("🔄 Cargando datos desde Notion..."):
+    preloaded_data = preload_all_data()
+
+locations_map = preload_all_data()['locations_map']
+all_devices = preloaded_data['devices']
+incidence_map = preloaded_data['incidence_map']
 
 with st.sidebar:
-    # Logo completo que ocupa todo el ancho
     st.image("img/logo.png", use_container_width=True)
     
-    try:
-        num_proximos = len(load_future_client_locations())
-    except:
-        num_proximos = 0
+    num_proximos = len(preloaded_data['future_locations'])
     
     today = date.today()
-    all_locs = q(LOCATIONS_ID, cache_ttl=300)
-    devices_tmp = load_devices()
+    all_locs = preloaded_data['all_locations']
+    devices_tmp = all_devices
     
     finished = []
     for p in all_locs:
@@ -894,11 +749,7 @@ with st.sidebar:
     
     num_finished = len(finished)
     
-    try:
-        actives_nav = load_active_incidents()
-        num_incidencias = len(actives_nav)
-    except:
-        num_incidencias = 0
+    num_incidencias = len(preloaded_data['active_incidents'])
     
     st.markdown("---")
     
@@ -924,11 +775,16 @@ with st.sidebar:
         opciones_menu[4]: "Incidencias"
     }
     
+    current_menu = st.session_state.get("menu", "Disponibles para Alquilar")
+    reverse_mapping = {v: k for k, v in menu_mapping.items()}
+    default_label = reverse_mapping.get(current_menu, opciones_menu[0])
+    
     selected_label = st.radio(
         label="nav",
         options=opciones_menu,
         label_visibility="collapsed",
-        key="nav_radio"
+        key="nav_radio",
+        index=opciones_menu.index(default_label)
     )
     
     st.session_state.menu = menu_mapping[selected_label]
@@ -936,19 +792,15 @@ with st.sidebar:
     st.markdown("----")
     
     if st.button("Refrescar", use_container_width=True):
-        cache_mgr.clear_all()
+        st.cache_data.clear()
         st.rerun()
 
-locations_map = load_locations_map()
-incidence_map = load_incidence_map()
-
-# ============================================================
-# PANTALLA 1: DISPONIBLES PARA ALQUILAR
-# ============================================================
+if "force_incidents_tab" in st.session_state and st.session_state.force_incidents_tab:
+    st.session_state.menu = "Incidencias"
+    st.session_state.force_incidents_tab = False
 
 if st.session_state.menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
-    # Botón de leyenda alineado a la derecha
     legend_button()
     
     c1, c2 = st.columns(2)
@@ -965,19 +817,15 @@ if st.session_state.menu == "Disponibles para Alquilar":
                 del st.session_state[key]
     
     if st.session_state.tab1_show:
-        devices = load_devices()
+        devices = all_devices
         
         avail = [
             d for d in devices
             if d.get("location_ids") and available(d, start, end)
         ]
         
-        # Segmentador fuera del contenedor con scroll
         avail_filtered, _ = smart_segmented_filter(avail, key_prefix="tab1")
         
-       
-        
-        # Contenedor con scroll para las cards
         with st.container(height=400, border=True):
             for d in avail_filtered:
                 key = f"a_{d['id']}"
@@ -1039,42 +887,35 @@ if st.session_state.menu == "Disponibles para Alquilar":
                                             if resp.status_code == 200:
                                                 success_count += 1
                                         
-                                        # Limpiar selección
                                         st.session_state.sel1 = []
                                         for key in list(st.session_state.keys()):
                                             if key.startswith("a_"):
                                                 del st.session_state[key]
                                         
-                                        # Borrar TODOS los cachés
-                                        cache_mgr.clear_all()
+                                        load_devices.clear()
+                                        load_future_client_locations.clear()
+                                        load_locations_map.clear()
+                                        q.clear()
+                                        preload_all_data.clear()
                                         
-                                        # Mostrar feedback
                                         feedback_placeholder.empty()
                                         show_feedback('success', f"{success_count} dispositivos asignados correctamente", duration=1.5)
                                         
-                                        # Esperar y recargar
                                         time.sleep(1.5)
                                         st.rerun()
+                                        st.stop()
                                     else:
                                         feedback_placeholder.empty()
                                         show_feedback('error', f"Error al crear ubicación: {response.status_code}", duration=3)
-
-# ============================================================
-# PANTALLA 2: GAFAS EN CASA
-# ============================================================
+                                        st.stop()
 
 elif st.session_state.menu == "Gafas en casa":
     st.title("Gafas en casa")
-    # Botón de leyenda
     legend_button()
     
-    # SIEMPRE cargar datos frescos si no existen
-    if "devices_live" not in st.session_state:
-        st.session_state.devices_live = load_devices()
-    
-    devices = st.session_state.devices_live
-    inh = load_inhouse()
-    oid = office_id()
+    devices = all_devices
+    inh = preloaded_data['inhouse']
+    oid = preloaded_data['office_id']
     
     inh_ids = [p["id"] for p in inh]
     
@@ -1084,10 +925,7 @@ elif st.session_state.menu == "Gafas en casa":
     ]
     
     with st.expander("Personal con dispositivos en casa", expanded=True):
-        # Segmentador fuera del contenedor con scroll
         inhouse_filtered, _ = smart_segmented_filter(inhouse_devices, key_prefix="inhouse")
-        
-        
         
         people_devices = {p["id"]: [] for p in inh}
         for d in inhouse_filtered:
@@ -1099,7 +937,6 @@ elif st.session_state.menu == "Gafas en casa":
             p for p in inh if len(people_devices[p["id"]]) > 0
         ]
         
-        # Contenedor con scroll
         with st.container(border=False):
             for person in people_with_devices:
                 pid = person["id"]
@@ -1127,18 +964,11 @@ elif st.session_state.menu == "Gafas en casa":
                                             resp = assign_device(d["id"], oid)
                                             
                                             if resp.status_code == 200:
-                                                # Borrar TODOS los cachés
-                                                cache_mgr.clear_all()
+                                                load_devices.clear()
+                                                preload_all_data.clear()
                                                 
-                                                # Borrar devices_live
-                                                if 'devices_live' in st.session_state:
-                                                    del st.session_state['devices_live']
-                                                
-                                                # Mostrar feedback
                                                 feedback_placeholder.empty()
                                                 show_feedback('success', "Movido a oficina", duration=1.5)
-                                                
-                                                # Esperar MÁS tiempo para que Notion actualice
                                                 time.sleep(1.5)
                                                 st.rerun()
                                             else:
@@ -1155,10 +985,8 @@ elif st.session_state.menu == "Gafas en casa":
     with st.expander("Otras gafas disponibles en oficina", expanded=expander_office_open):
         st.session_state.expander_office_open = True
         
-        # Segmentador fuera del contenedor con scroll
         office_filtered, _ = smart_segmented_filter(office_devices, key_prefix="office")
         
-        # Contenedor con scroll
         with st.container(height=400, border=True):
             for d in office_filtered:
                 key = f"o_{d['id']}"
@@ -1201,23 +1029,16 @@ elif st.session_state.menu == "Gafas en casa":
                                 if resp.status_code == 200:
                                     success_count += 1
                             
-                            # Limpiar selección
                             st.session_state.sel2 = []
                             for key in list(st.session_state.keys()):
                                 if key.startswith("o_"):
                                     del st.session_state[key]
                             
-                            # Cerrar expander
                             st.session_state.expander_office_open = False
                             
-                            # Borrar TODOS los cachés
-                            cache_mgr.clear_all()
+                            load_devices.clear()
+                            preload_all_data.clear()
                             
-                            # Borrar devices_live
-                            if 'devices_live' in st.session_state:
-                                del st.session_state['devices_live']
-                            
-                            # Feedback y rerun
                             feedback_placeholder.empty()
                             show_feedback('success', f"{success_count} dispositivos asignados", duration=1.5)
                             time.sleep(1.5)
@@ -1226,16 +1047,11 @@ elif st.session_state.menu == "Gafas en casa":
     if not expander_office_open:
         st.session_state.expander_office_open = False
 
-# ============================================================
-# PANTALLA 3: PRÓXIMOS ENVÍOS
-# ============================================================
-
 elif st.session_state.menu == "Próximos Envíos":
     st.title("Próximos Envíos")
-    # Botón de leyenda
     legend_button()
     
-    future_locs = load_future_client_locations()
+    future_locs = preloaded_data['future_locations']
     
     with st.expander(f"Envíos futuros ({len(future_locs)})", expanded=True):
         if len(future_locs) == 0:
@@ -1248,7 +1064,7 @@ elif st.session_state.menu == "Próximos Envíos":
             end = fmt(loc["end"])
             loc_id = loc["id"]
             
-            devices = load_devices()
+            devices = all_devices
             
             expander_key = f"expander_loc_{loc_id}"
             is_expanded = st.session_state.get(expander_key, False)
@@ -1261,7 +1077,6 @@ elif st.session_state.menu == "Próximos Envíos":
                     if loc_id in d["location_ids"]
                 ]
                 
-                # SI NO HAY DISPOSITIVOS ASIGNADOS, MOSTRAR ADVERTENCIA Y BOTÓN DE BORRAR
                 if len(assigned) == 0:
                     st.warning("Este envío no tiene dispositivos asignados")
                     
@@ -1270,7 +1085,6 @@ elif st.session_state.menu == "Próximos Envíos":
                             feedback_placeholder = st.empty()
                             with feedback_placeholder:
                                 with st.spinner("Eliminando envío..."):
-                                    # Archivar (borrar) el location en Notion
                                     delete_response = requests.patch(
                                         f"https://api.notion.com/v1/pages/{loc_id}",
                                         headers=headers,
@@ -1278,27 +1092,24 @@ elif st.session_state.menu == "Próximos Envíos":
                                     )
                                     
                                     if delete_response.status_code == 200:
-                                        # Borrar TODOS los cachés
-                                        cache_mgr.clear_all()
+                                        load_future_client_locations.clear()
+                                        q.clear()
+                                        preload_all_data.clear()
                                         
-                                        # Mostrar feedback
                                         feedback_placeholder.empty()
                                         show_feedback('success', f"Envío '{lname}' eliminado", duration=1.5)
-                                        
-                                        # Esperar y recargar
                                         time.sleep(1.5)
                                         st.rerun()
+                                        st.stop()
                                     else:
                                         feedback_placeholder.empty()
                                         show_feedback('error', f"Error al eliminar: {delete_response.status_code}", duration=3)
+                                        st.stop()
                 else:
-                    # SI HAY DISPOSITIVOS, MOSTRAR LA LISTA
                     st.subheader("Dispositivos asignados")
                     
-                    # Segmentador fuera del contenedor
                     assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
                     
-                    # Contenedor con scroll
                     with st.container(border=False):
                         for d in assigned_filtered:
                             cols = st.columns([8, 2])
@@ -1321,24 +1132,19 @@ elif st.session_state.menu == "Próximos Envíos":
                                                 resp = assign_device(d["id"], office_id())
                                                 
                                                 if resp.status_code == 200:
-                                                    # Borrar TODOS los cachés
-                                                    cache_mgr.clear_all()
+                                                    load_devices.clear()
+                                                    preload_all_data.clear()
                                                     
-                                                    # Mostrar feedback
                                                     feedback_placeholder.empty()
                                                     show_feedback('success', "Dispositivo quitado", duration=1.5)
-                                                    
-                                                    # Mantener expander abierto
                                                     st.session_state[expander_key] = True
-                                                    
-                                                    # Esperar y recargar
                                                     time.sleep(1.5)
-                                                    st.rerun()
                                                 else:
                                                     feedback_placeholder.empty()
                                                     show_feedback('error', f"Error: {resp.status_code}", duration=2)
+                                    st.rerun()
+                                    st.stop()
                 
-                # EXPANDER PARA AÑADIR GAFAS (SIEMPRE SE MUESTRA)
                 add_expander_key = f"add_expander_{loc_id}"
                 add_expanded = st.session_state.get(add_expander_key, False)
                 
@@ -1355,12 +1161,10 @@ elif st.session_state.menu == "Próximos Envíos":
                         and loc_id not in d["location_ids"]
                     ]
                     
-                    # Segmentador fuera del contenedor
                     can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
                     
                     checkbox_keys = []
                     
-                    # Contenedor con scroll
                     with st.container(height=400, border=True):
                         for d in can_add_filtered:
                             key = f"add_{loc_id}_{d['id']}"
@@ -1404,23 +1208,18 @@ elif st.session_state.menu == "Próximos Envíos":
                                             if resp.status_code == 200:
                                                 success_count += 1
                                         
-                                        # Limpiar checkboxes
                                         for key in checkbox_keys:
                                             if key in st.session_state:
                                                 del st.session_state[key]
                                         
-                                        # Borrar TODOS los cachés
-                                        cache_mgr.clear_all()
+                                        load_devices.clear()
+                                        preload_all_data.clear()
                                         
-                                        # Configurar estados de expanders
                                         st.session_state[expander_key] = True
                                         st.session_state[add_expander_key] = False
                                         
-                                        # Mostrar feedback
                                         feedback_placeholder.empty()
                                         show_feedback('success', f"{success_count} dispositivos añadidos", duration=1.5)
-                                        
-                                        # Esperar y recargar
                                         time.sleep(1.5)
                                         st.rerun()
                 
@@ -1430,16 +1229,12 @@ elif st.session_state.menu == "Próximos Envíos":
             if not is_expanded:
                 st.session_state[expander_key] = False
 
-# ============================================================
-# PANTALLA 4: CHECK-IN
-# ============================================================
-
 elif st.session_state.menu == "Check-In":
     st.title("Check-In de Gafas")
     
     today = date.today()
-    all_locs = q(LOCATIONS_ID, cache_ttl=300)
-    devices = load_devices()
+    all_locs = preloaded_data['all_locations']
+    devices = all_devices
     
     finished = []
     
@@ -1495,7 +1290,6 @@ elif st.session_state.menu == "Check-In":
         
         with st.expander(f"Gafas para recepcionar ({len(assigned)})", expanded=True):
             
-            # Contenedor con scroll
             with st.container(border=False):
                 for d in assigned:
                     cols = st.columns([8, 2])
@@ -1515,7 +1309,6 @@ elif st.session_state.menu == "Check-In":
                                 feedback_placeholder = st.empty()
                                 with feedback_placeholder:
                                     with st.spinner("Procesando Check-In..."):
-                                        # PASO 1: Crear registro en histórico
                                         payload = {
                                             "parent": {"database_id": HISTORIC_ID},
                                             "properties": {
@@ -1543,18 +1336,15 @@ elif st.session_state.menu == "Check-In":
                                             feedback_placeholder.empty()
                                             show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
                                         else:
-                                            # PASO 2: Mover dispositivo a oficina
                                             resp = assign_device(d["id"], office)
                                             
                                             if resp.status_code == 200:
-                                                # PASO 3: Borrar TODOS los cachés
-                                                cache_mgr.clear_all()
+                                                load_devices.clear()
+                                                q.clear()
+                                                preload_all_data.clear()
                                                 
-                                                # PASO 4: Mostrar feedback
                                                 feedback_placeholder.empty()
                                                 show_feedback('success', "Check-In completado", duration=1.5)
-                                                
-                                                # PASO 5: Esperar y recargar
                                                 time.sleep(1.5)
                                                 st.rerun()
                                             else:
@@ -1562,27 +1352,15 @@ elif st.session_state.menu == "Check-In":
                                                 show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
 
 
-# ============================================================
-# PANTALLA 5: INCIDENCIAS
-# ============================================================
-
 elif st.session_state.menu == "Incidencias":
     st.title("Incidencias de dispositivos")
     
-    # FORZAR VOLVER A INCIDENCIAS SI SE RECARGÓ DESDE UN BOTÓN
-    if "force_incidents_tab" in st.session_state and st.session_state.force_incidents_tab:
-        st.session_state.menu = "Incidencias"
-        st.session_state.force_incidents_tab = False
-    
-    # Cargar incidencias
-    actives = load_active_incidents()
-    pasts = load_past_incidents()
-    devices = load_devices()
+    actives = preloaded_data['active_incidents']
+    pasts = preloaded_data['past_incidents']
+    devices = all_devices
 
-    # Crear mapa de dispositivos (solo nombre y referencia)
     device_map = {d["id"]: d for d in devices}
 
-    # Estructurar incidencias por dispositivo
     incidents_by_device = {}
     
     for inc in actives:
@@ -1599,19 +1377,12 @@ elif st.session_state.menu == "Incidencias":
         incidents_by_device.setdefault(did, {"active": [], "past": []})
         incidents_by_device[did]["past"].append(inc)
 
-    # Calcular total activas
     total_active = sum(len(v["active"]) for v in incidents_by_device.values())
-
-    # ============================================================
-    # EXPANDER 1 – LISTADO DE INCIDENCIAS (SIEMPRE ABIERTO)
-    # ============================================================
 
     with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=True):
         
-        # Obtener todos los dispositivos con incidencias
         devices_with_incidents = [device_map[did] for did in incidents_by_device.keys() if did in device_map]
         
-        # Segmentador fuera del contenedor
         devices_filtered, selected_group = smart_segmented_filter(
             devices_with_incidents, 
             key_prefix="incidents_filter",
@@ -1619,37 +1390,22 @@ elif st.session_state.menu == "Incidencias":
             incidence_map=incidence_map
         )
         
-        # Filtrar incidents_by_device según los dispositivos filtrados
         filtered_device_ids = {d["id"] for d in devices_filtered}
         filtered_incidents_by_device = {
             did: lists for did, lists in incidents_by_device.items() 
             if did in filtered_device_ids
         }
         
-        # Resetear a página 1 cuando cambia el filtro
-        if "last_selected_group" not in st.session_state:
-            st.session_state.last_selected_group = selected_group
-        elif st.session_state.last_selected_group != selected_group:
-            st.session_state.incidents_current_page = 1
-            st.session_state.last_selected_group = selected_group
-        
-        # Recalcular total activas después del filtro
         total_active_filtered = sum(len(v["active"]) for v in filtered_incidents_by_device.values())
 
         if not filtered_incidents_by_device:
             st.info("No hay incidencias registradas para este tipo de dispositivo.")
         else:
-            # ============================================================
-            # PREPARAR LISTA DE INCIDENCIAS PARA PAGINAR
-            # ============================================================
-            
-            # Crear lista de todas las incidencias para paginar
             all_incidents_list = []
             for did, lists in filtered_incidents_by_device.items():
                 dev = device_map.get(did)
                 dev_name = dev["Name"] if dev else "Dispositivo desconocido"
                 
-                # Añadir incidencias activas
                 active_sorted = sorted(
                     lists["active"], key=lambda x: x.get("Created") or "", reverse=True
                 )
@@ -1660,7 +1416,6 @@ elif st.session_state.menu == "Incidencias":
                         "inc": inc
                     })
                 
-                # Añadir incidencias pasadas
                 past_sorted = sorted(
                     lists["past"], key=lambda x: x.get("Created") or "", reverse=True
                 )
@@ -1671,43 +1426,13 @@ elif st.session_state.menu == "Incidencias":
                         "inc": inc
                     })
             
-            # ============================================================
-            # CONFIGURACIÓN DEL PAGINADOR
-            # ============================================================
-            
-            items_per_page = 10  # Número de incidencias por página
-            total_items = len(all_incidents_list)
-            total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
-            
-            # Inicializar página actual en session_state
-            if "incidents_current_page" not in st.session_state:
-                st.session_state.incidents_current_page = 1
-            
-            # Asegurarse de que la página actual esté dentro del rango válido
-            if st.session_state.incidents_current_page > total_pages:
-                st.session_state.incidents_current_page = 1
-            
-            # Calcular índices para la página actual
-            start_idx = (st.session_state.incidents_current_page - 1) * items_per_page
-            end_idx = start_idx + items_per_page
-            
-            # Obtener incidencias de la página actual
-            current_page_incidents = all_incidents_list[start_idx:end_idx]
-            
-            # ============================================================
-            # MOSTRAR INCIDENCIAS DE LA PÁGINA ACTUAL (CON SCROLL)
-            # ============================================================
-            
-            with st.container(border=True):
-                for item in current_page_incidents:
+            with st.container(height=500, border=True):
+                for item in all_incidents_list:
                     inc = item["inc"]
                     dev_name = item["dev_name"]
                     inc_type = item["type"]
                     
                     if inc_type == "active":
-                        # ============================================================
-                        # INCIDENCIAS ACTIVAS (ROJO)
-                        # ============================================================
                         notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
                         created = fmt_datetime(inc.get("Created"))
 
@@ -1721,12 +1446,10 @@ elif st.session_state.menu == "Incidencias":
                         with cols[1]:
                             if st.button("Resolver", key=f"resolve_{inc['id']}", use_container_width=True):
                                 st.session_state.solve_inc = inc
+                                st.session_state.force_incidents_tab = True
                                 st.rerun()
                     
                     else:
-                        # ============================================================
-                        # INCIDENCIAS PASADAS (GRIS)
-                        # ============================================================
                         notes = inc.get("Notes", "").replace("<", "&lt;").replace(">", "&gt;")
                         created = fmt_datetime(inc.get("Created"))
                         resolved = fmt_datetime(inc.get("Resolved"))
@@ -1741,102 +1464,6 @@ elif st.session_state.menu == "Incidencias":
                             f"""<div style='margin-left:20px;margin-bottom:10px;padding:8px;background:#F5F5F5;border-radius:4px;'><div style='display:flex;align-items:center;margin-bottom:4px;'><div style='width:10px;height:10px;background:#9E9E9E;border-radius:50%;margin-right:8px;'></div><strong style='font-size:14px;color:#555;'>{dev_name}</strong><span style='margin:0 6px;color:#AAA;'>|</span><strong style='font-size:14px;color:#555;'>{inc['Name']}</strong><span style='margin-left:8px;color:#888;font-size:12px;'>Creada: {created} → Resuelta: {resolved}</span></div><div style='margin-left:18px;color:#666;font-size:13px;'>{notes if notes else '<em>Sin notas</em>'}</div>{rnotes_html}</div>""",
                             unsafe_allow_html=True
                         )
-            
-            # ============================================================
-            # PAGINADOR CON NÚMEROS (ABAJO A LA DERECHA)
-            # ============================================================
-            
-            if total_pages > 1:
-                st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-                # Botón de leyenda
-                legend_button()
-                
-                # Crear contenedor alineado a la derecha
-                col_spacer, col_pagination = st.columns([8, 2])
-                
-                with col_pagination:
-                    # Determinar qué páginas mostrar
-                    max_visible_pages = 5  # Número máximo de botones de página visibles
-                    
-                    # Calcular rango de páginas a mostrar
-                    if total_pages <= max_visible_pages:
-                        page_range = range(1, total_pages + 1)
-                    else:
-                        # Mostrar páginas alrededor de la página actual
-                        start_page = max(1, st.session_state.incidents_current_page - 2)
-                        end_page = min(total_pages, start_page + max_visible_pages - 1)
-                        
-                        # Ajustar si estamos cerca del final
-                        if end_page == total_pages:
-                            start_page = max(1, end_page - max_visible_pages + 1)
-                        
-                        page_range = range(start_page, end_page + 1)
-                    
-                    # Crear botones de página
-                    page_buttons = []
-                    
-                    # Botón "Primera página" si no está visible
-                    if 1 not in page_range and total_pages > max_visible_pages:
-                        page_buttons.append("1")
-                        if min(page_range) > 2:
-                            page_buttons.append("...")
-                    
-                    # Botones de páginas
-                    for page_num in page_range:
-                        page_buttons.append(str(page_num))
-                    
-                    # Botón "Última página" si no está visible
-                    if total_pages not in page_range and total_pages > max_visible_pages:
-                        if max(page_range) < total_pages - 1:
-                            page_buttons.append("...")
-                        page_buttons.append(str(total_pages))
-                    
-                    # Crear HTML para los botones
-                    buttons_html = "<div style='display:flex;justify-content:flex-end;gap:5px;flex-wrap:wrap;'>"
-                    
-                    for btn_text in page_buttons:
-                        if btn_text == "...":
-                            buttons_html += "<span style='padding:6px 10px;color:#999;'>...</span>"
-                        else:
-                            page_num = int(btn_text)
-                            is_current = (page_num == st.session_state.incidents_current_page)
-                            
-                            bg_color = "#B3E5E6" if is_current else "#E0E0E0"
-                            text_color = "#000" if is_current else "#666"
-                            cursor = "default" if is_current else "pointer"
-                            font_weight = "bold" if is_current else "normal"
-                            
-                            buttons_html += f"""
-                            <div style='padding:6px 12px;background:{bg_color};color:{text_color};
-                                        border-radius:4px;cursor:{cursor};font-weight:{font_weight};
-                                        user-select:none;min-width:30px;text-align:center;'>
-                                {btn_text}
-                            </div>
-                            """
-                    
-                    buttons_html += "</div>"
-                    
-                    st.markdown(buttons_html, unsafe_allow_html=True)
-                    
-                    # Crear columnas para los botones clicables
-                    cols = st.columns(len(page_buttons))
-                    
-                    for idx, btn_text in enumerate(page_buttons):
-                        if btn_text != "...":
-                            page_num = int(btn_text)
-                            with cols[idx]:
-                                if st.button(
-                                    " ", 
-                                    key=f"page_{page_num}", 
-                                    disabled=(page_num == st.session_state.incidents_current_page),
-                                    use_container_width=True
-                                ):
-                                    st.session_state.incidents_current_page = page_num
-                                    st.rerun()
-
-    # ============================================================
-    # SIDEBAR – RESOLVER INCIDENCIA
-    # ============================================================
 
     if "solve_inc" not in st.session_state:
         st.session_state.solve_inc = None
@@ -1887,7 +1514,6 @@ elif st.session_state.menu == "Incidencias":
                                     "rich_text": [{"text": {"content": rnotes}}]
                                 }
 
-                            # PASO 1: Crear en PAST
                             r1 = requests.post(
                                 "https://api.notion.com/v1/pages",
                                 headers=headers,
@@ -1895,7 +1521,6 @@ elif st.session_state.menu == "Incidencias":
                             )
 
                             if r1.status_code == 200:
-                                # PASO 2: Archivar active
                                 r2 = requests.patch(
                                     f"https://api.notion.com/v1/pages/{inc['id']}",
                                     headers=headers,
@@ -1903,21 +1528,18 @@ elif st.session_state.menu == "Incidencias":
                                 )
 
                                 if r2.status_code == 200:
-                                    # PASO 3: Limpiar estado
                                     st.session_state.solve_inc = None
                                     st.session_state.add_new_incident_expander = False
-
-                                    # PASO 4: Marcar que debe volver a Incidencias
                                     st.session_state.force_incidents_tab = True
                                     
-                                    # PASO 5: Borrar TODOS los cachés
-                                    cache_mgr.clear_all()
+                                    load_active_incidents.clear()
+                                    load_past_incidents.clear()
+                                    load_incidence_map.clear()
+                                    q.clear()
+                                    preload_all_data.clear()
 
-                                    # PASO 6: Mostrar feedback
                                     feedback.empty()
                                     show_feedback("success", "Incidencia resuelta", duration=1.5)
-                                    
-                                    # PASO 7: Esperar y recargar
                                     time.sleep(1.5)
                                     st.rerun()
 
@@ -1934,28 +1556,19 @@ elif st.session_state.menu == "Incidencias":
                     st.session_state.solve_inc = None
                     st.rerun()
 
-    # ============================================================
-    # EXPANDER 2 – AÑADIR NUEVA INCIDENCIA
-    # ============================================================
-
     add_new_expanded = st.session_state.get("add_new_incident_expander", False)
 
     with st.expander("Añadir nueva incidencia", expanded=add_new_expanded):
 
-        # Filtrar solo dispositivos con localización asignada (C, H o O)
         devices_with_location = [
             d for d in devices 
             if d.get("location_ids") and len(d["location_ids"]) > 0
         ]
 
-        # Segmentador fuera del contenedor
         devices_filtered_new, _ = smart_segmented_filter(devices_with_location, key_prefix="new_inc")
-        
-
 
         sel_keys = []
 
-        # Contenedor con scroll
         with st.container(height=300, border=True):
             for d in devices_filtered_new:
                 key = f"newinc_{d['id']}"
@@ -2022,33 +1635,24 @@ elif st.session_state.menu == "Incidencias":
                                         break
 
                                 if ok:
-                                    # PASO 1: Limpiar checkboxes
                                     for key in sel_keys:
                                         if key in st.session_state:
                                             del st.session_state[key]
 
-                                    # PASO 2: Borrar formulario
                                     if "new_inc_name" in st.session_state:
                                         del st.session_state["new_inc_name"]
                                     if "new_inc_notes" in st.session_state:
                                         del st.session_state["new_inc_notes"]
 
-                                    # PASO 3: Cerrar expander
                                     st.session_state.add_new_incident_expander = False
-                                    
-                                    # PASO 4: Resetear página a 1
-                                    st.session_state.incidents_current_page = 1
-
-                                    # PASO 5: Marcar que debe volver a Incidencias
                                     st.session_state.force_incidents_tab = True
                                     
-                                    # PASO 6: Borrar TODOS los cachés
-                                    cache_mgr.clear_all()
+                                    load_active_incidents.clear()
+                                    load_incidence_map.clear()
+                                    q.clear()
+                                    preload_all_data.clear()
 
-                                    # PASO 7: Mostrar feedback
                                     feedback.empty()
                                     show_feedback("success", "Incidencia creada", duration=1.5)
-                                    
-                                    # PASO 8: Esperar y recargar
                                     time.sleep(1.5)
                                     st.rerun()
