@@ -43,7 +43,7 @@ st.markdown("""
     }
     
     .stFormSubmitButton > button:hover {
-        background-color: #919D9D;
+        background-color: #818282;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -319,7 +319,7 @@ def card(name, location_types=None, selected=False, incident_counts=None):
     
     color_map_badge = {
         "Office": "#4CAF50",
-        "In House": "#1565C0",
+        "In House": "#919D9D",
         "Client": "#FF9800"
     }
     
