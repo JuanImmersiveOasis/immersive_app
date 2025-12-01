@@ -9,6 +9,46 @@ load_dotenv()
 
 st.set_page_config(page_title="Logistica", page_icon=None, layout="wide")
 
+st.markdown("""
+    <style>
+    /* Botones principales */
+    .stButton > button {
+        background-color: #00859b;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 20px;
+        font-weight: 600;
+        transition: all 0.2s ease;
+    }
+    
+    .stButton > button:hover {
+        background-color: #006d82;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    }
+    
+    .stButton > button:active {
+        background-color: #005565;
+        transform: translateY(0px);
+    }
+    
+    /* Botones de formulario */
+    .stFormSubmitButton > button {
+        background-color: #919D9D;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+    }
+    
+    .stFormSubmitButton > button:hover {
+        background-color: #818282;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 try:
     NOTION_TOKEN = st.secrets["NOTION_TOKEN"]
 except:
