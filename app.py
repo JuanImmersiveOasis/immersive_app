@@ -9,46 +9,6 @@ load_dotenv()
 
 st.set_page_config(page_title="Logistica", page_icon=None, layout="wide")
 
-st.markdown("""
-    <style>
-    /* Botones principales */
-    .stButton > button {
-        background-color: #00859b;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        padding: 8px 20px;
-        font-weight: 600;
-        transition: all 0.2s ease;
-    }
-    
-    .stButton > button:hover {
-        background-color: #006d82;
-        transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-    }
-    
-    .stButton > button:active {
-        background-color: #005565;
-        transform: translateY(0px);
-    }
-    
-    /* Botones de formulario */
-    .stFormSubmitButton > button {
-        background-color: #919D9D;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-weight: 600;
-    }
-    
-    .stFormSubmitButton > button:hover {
-        background-color: #919D9D;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-
 try:
     NOTION_TOKEN = st.secrets["NOTION_TOKEN"]
 except:
@@ -319,7 +279,7 @@ def card(name, location_types=None, selected=False, incident_counts=None):
     
     color_map_badge = {
         "Office": "#4CAF50",
-        "In House": "#1565C0",
+        "In House": "#919D9D",
         "Client": "#FF9800"
     }
     
@@ -742,7 +702,8 @@ for key, default in [
     ("sel3", []),
     ("tab3_loc", None),
     ("show_avail_tab3", False),
-    ("show_avail_home", False)
+    ("show_avail_home", False),
+    ("processing_action", False)
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -998,22 +959,19 @@ elif st.session_state.menu == "Gafas en casa":
                         
                         with cols[1]:
                             if st.button("Devolver", key=f"rm_{d['id']}", use_container_width=True):
-                                with st.sidebar:
-                                    feedback_placeholder = st.empty()
-                                    with feedback_placeholder:
+                                if not st.session_state.processing_action:
+                                    st.session_state.processing_action = True
+                                    with st.sidebar:
                                         with st.spinner("Moviendo a oficina..."):
                                             resp = assign_device(d["id"], oid)
                                             
                                             if resp.status_code == 200:
                                                 load_devices.clear()
                                                 preload_all_data.clear()
-                                                
-                                                feedback_placeholder.empty()
-                                                show_feedback('success', "Movido a oficina", duration=1.5)
-                                                time.sleep(1.5)
+                                                st.session_state.processing_action = False
                                                 st.rerun()
                                             else:
-                                                feedback_placeholder.empty()
+                                                st.session_state.processing_action = False
                                                 show_feedback('error', f"Error: {resp.status_code}", duration=2)
     
     office_devices = [
@@ -1123,29 +1081,20 @@ elif st.session_state.menu == "Próximos Envíos":
                     
                     if st.button("Borrar envío", key=f"delete_loc_{loc_id}", use_container_width=True):
                         with st.sidebar:
-                            feedback_placeholder = st.empty()
-                            with feedback_placeholder:
-                                with st.spinner("Eliminando envío..."):
-                                    delete_response = requests.patch(
-                                        f"https://api.notion.com/v1/pages/{loc_id}",
-                                        headers=headers,
-                                        json={"archived": True}
-                                    )
-                                    
-                                    if delete_response.status_code == 200:
-                                        load_future_client_locations.clear()
-                                        q.clear()
-                                        preload_all_data.clear()
-                                        
-                                        feedback_placeholder.empty()
-                                        show_feedback('success', f"Envío '{lname}' eliminado", duration=1.5)
-                                        time.sleep(1.5)
-                                        st.rerun()
-                                        st.stop()
-                                    else:
-                                        feedback_placeholder.empty()
-                                        show_feedback('error', f"Error al eliminar: {delete_response.status_code}", duration=3)
-                                        st.stop()
+                            with st.spinner("Eliminando envío..."):
+                                delete_response = requests.patch(
+                                    f"https://api.notion.com/v1/pages/{loc_id}",
+                                    headers=headers,
+                                    json={"archived": True}
+                                )
+                                
+                                if delete_response.status_code == 200:
+                                    load_future_client_locations.clear()
+                                    q.clear()
+                                    preload_all_data.clear()
+                                    st.rerun()
+                                else:
+                                    show_feedback('error', f"Error al eliminar: {delete_response.status_code}", duration=3)
                 else:
                     st.subheader("Dispositivos asignados")
                     
@@ -1166,31 +1115,26 @@ elif st.session_state.menu == "Próximos Envíos":
                             
                             with cols[1]:
                                 if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
-                                    with st.sidebar:
-                                        feedback_placeholder = st.empty()
-                                        with feedback_placeholder:
+                                    if not st.session_state.processing_action:
+                                        st.session_state.processing_action = True
+                                        with st.sidebar:
                                             with st.spinner("Quitando dispositivo..."):
                                                 resp = assign_device(d["id"], office_id())
                                                 
                                                 if resp.status_code == 200:
                                                     load_devices.clear()
                                                     preload_all_data.clear()
-                                                    
-                                                    feedback_placeholder.empty()
-                                                    show_feedback('success', "Dispositivo quitado", duration=1.5)
                                                     st.session_state[expander_key] = True
-                                                    time.sleep(1.5)
+                                                    st.session_state.processing_action = False
+                                                    st.rerun()
                                                 else:
-                                                    feedback_placeholder.empty()
+                                                    st.session_state.processing_action = False
                                                     show_feedback('error', f"Error: {resp.status_code}", duration=2)
-                                    st.rerun()
-                                    st.stop()
                 
                 add_expander_key = f"add_expander_{loc_id}"
                 add_expanded = st.session_state.get(add_expander_key, False)
                 
                 with st.expander("Más gafas disponibles", expanded=add_expanded):
-                    st.session_state[add_expander_key] = True
                     
                     ls = iso_to_date(loc["start"])
                     le = iso_to_date(loc["end"])
@@ -1236,36 +1180,30 @@ elif st.session_state.menu == "Próximos Envíos":
                     sel_count = len(selected_ids)
                     
                     if sel_count > 0:
+                        st.session_state[add_expander_key] = True
+                    
+                    if sel_count > 0:
                         with st.sidebar:
                             counter_badge(sel_count, len(can_add_filtered))
                             
                             if st.button(f"Añadir a {lname}", key=f"assign_btn_{loc_id}", use_container_width=True):
-                                feedback_placeholder = st.empty()
-                                with feedback_placeholder:
-                                    with st.spinner("Añadiendo dispositivos..."):
-                                        success_count = 0
-                                        for did in selected_ids:
-                                            resp = assign_device(did, loc_id)
-                                            if resp.status_code == 200:
-                                                success_count += 1
-                                        
-                                        for key in checkbox_keys:
-                                            if key in st.session_state:
-                                                del st.session_state[key]
-                                        
-                                        load_devices.clear()
-                                        preload_all_data.clear()
-                                        
-                                        st.session_state[expander_key] = True
-                                        st.session_state[add_expander_key] = False
-                                        
-                                        feedback_placeholder.empty()
-                                        show_feedback('success', f"{success_count} dispositivos añadidos", duration=1.5)
-                                        time.sleep(1.5)
-                                        st.rerun()
-                
-                if not add_expanded:
-                    st.session_state[add_expander_key] = False
+                                with st.spinner("Añadiendo dispositivos..."):
+                                    success_count = 0
+                                    for did in selected_ids:
+                                        resp = assign_device(did, loc_id)
+                                        if resp.status_code == 200:
+                                            success_count += 1
+                                    
+                                    for key in checkbox_keys:
+                                        if key in st.session_state:
+                                            del st.session_state[key]
+                                    
+                                    load_devices.clear()
+                                    preload_all_data.clear()
+                                    
+                                    st.session_state[expander_key] = True
+                                    st.session_state[add_expander_key] = False
+                                    st.rerun()
             
             if not is_expanded:
                 st.session_state[expander_key] = False
@@ -1347,9 +1285,9 @@ elif st.session_state.menu == "Check-In":
                     
                     with cols[1]:
                         if st.button("Check-In", key=f"checkin_{d['id']}", use_container_width=True):
-                            with st.sidebar:
-                                feedback_placeholder = st.empty()
-                                with feedback_placeholder:
+                            if not st.session_state.processing_action:
+                                st.session_state.processing_action = True
+                                with st.sidebar:
                                     with st.spinner("Procesando Check-In..."):
                                         payload = {
                                             "parent": {"database_id": HISTORIC_ID},
@@ -1375,7 +1313,7 @@ elif st.session_state.menu == "Check-In":
                                         )
                                         
                                         if r.status_code != 200:
-                                            feedback_placeholder.empty()
+                                            st.session_state.processing_action = False
                                             show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
                                         else:
                                             resp = assign_device(d["id"], office)
@@ -1384,13 +1322,10 @@ elif st.session_state.menu == "Check-In":
                                                 load_devices.clear()
                                                 q.clear()
                                                 preload_all_data.clear()
-                                                
-                                                feedback_placeholder.empty()
-                                                show_feedback('success', "Check-In completado", duration=1.5)
-                                                time.sleep(1.5)
+                                                st.session_state.processing_action = False
                                                 st.rerun()
                                             else:
-                                                feedback_placeholder.empty()
+                                                st.session_state.processing_action = False
                                                 show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
 
 
