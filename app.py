@@ -319,7 +319,7 @@ def card(name, location_types=None, selected=False, incident_counts=None):
     
     color_map_badge = {
         "Office": "#4CAF50",
-        "In House": "#919D9D",
+        "In House": "#1565C0",
         "Client": "#FF9800"
     }
     
@@ -1399,14 +1399,32 @@ elif st.session_state.menu == "Incidencias":
 
     with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=True):
         
-        devices_with_incidents = [device_map[did] for did in incidents_by_device.keys() if did in device_map]
-        
+        devices_with_incidents = [
+        device_map[did] for did in incidents_by_device.keys() if did in device_map
+    ]
+
+        # 🔍 BUSCADOR DINÁMICO (PÉGALO AQUÍ)
+        search_query = st.text_input(
+            "Buscar dispositivo...",
+            placeholder="Ej: Quest 3, Quest 2, Vision Pro...",
+            key="inc_dynamic_search"
+        )
+
+        if search_query:
+            q = search_query.lower().strip()
+            devices_with_incidents = [
+                d for d in devices_with_incidents 
+                if q in d["Name"].lower()
+            ]
+
+        # 👉 EL FILTRO SEGMENTADO VA DESPUÉS — NO LO MUEVAS
         devices_filtered, selected_group = smart_segmented_filter(
             devices_with_incidents, 
             key_prefix="incidents_filter",
             show_red_for_active=True,
             incidence_map=incidence_map
         )
+
         
         filtered_device_ids = {d["id"] for d in devices_filtered}
         filtered_incidents_by_device = {
