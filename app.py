@@ -847,9 +847,9 @@ if st.session_state.menu == "Disponibles para Alquilar":
     
     c1, c2 = st.columns(2)
     with c1:
-        start = st.date_input("Fecha inicio", date.today())
+        start = st.date_input("Fecha salida", date.today())
     with c2:
-        end = st.date_input("Fecha fin", date.today())
+        end = st.date_input("Fecha regreso", date.today())
     
     if st.button("Comprobar disponibilidad"):
         st.session_state.tab1_show = True
