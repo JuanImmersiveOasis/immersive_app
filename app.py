@@ -52,6 +52,7 @@ st.markdown("""
     }
     
     .stFormSubmitButton > button:hover {
+<<<<<<< HEAD
         background-color: #919D9D;
 =======
         transition: all 0.2s ease;
@@ -67,6 +68,9 @@ st.markdown("""
         background-color: #005565;
         transform: translateY(0px);
 >>>>>>> Mejoras
+=======
+        background-color: #818282;
+>>>>>>> d072c3c8f8b6c68c47ac77b98df3fc03c8948905
     }
     </style>
     """, unsafe_allow_html=True)
