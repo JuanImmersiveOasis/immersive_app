@@ -1547,33 +1547,20 @@ elif st.session_state.menu == "Almacén":
                 loc_id = loc["id"]
                 devices = all_devices
                 
-                st.markdown("---")
+                status_options = ["📋 Planificado", "📦 Empaquetado", "🚚 En camino"]
+                default_status = st.session_state.get(f"status_{loc_id}", "📋 Planificado")
+                if default_status not in status_options:
+                    default_status = "📋 Planificado"
                 
-                col_status, col_headphones = st.columns(2)
+                selected_status = st.selectbox(
+                    "Estado del envío:",
+                    status_options,
+                    index=status_options.index(default_status),
+                    key=f"status_select_{loc_id}"
+                )
                 
-                with col_status:
-                    status_options = ["📋 Planificado", "📦 Empaquetado", "🚚 En camino"]
-                    default_status = st.session_state.get(f"status_{loc_id}", "📋 Planificado")
-                    if default_status not in status_options:
-                        default_status = "📋 Planificado"
-                    
-                    selected_status = st.selectbox(
-                        "Estado del envío:",
-                        status_options,
-                        index=status_options.index(default_status),
-                        key=f"status_select_{loc_id}"
-                    )
-                    
-                    st.session_state[f"status_{loc_id}"] = selected_status
+                st.session_state[f"status_{loc_id}"] = selected_status
                 
-                with col_headphones:
-                    includes_headphones = st.checkbox(
-                        "🎧 Incluye cascos",
-                        value=st.session_state.get(f"headphones_{loc_id}", False),
-                        key=f"headphones_{loc_id}"
-                    )
-                
-                st.markdown("---")
                 
                 assigned = [
                     d for d in devices
@@ -1590,7 +1577,12 @@ elif st.session_state.menu == "Almacén":
                     and loc_id not in d["location_ids"]
                 ]
                 
-                with st.expander(f"📅 Fechas [{fmt(loc['start'])} → {fmt(loc['end'])}]", expanded=False):
+                expander_dates_key = f"expander_dates_{loc_id}"
+                expander_dates_open = st.session_state.get(expander_dates_key, False)
+                
+                with st.expander(f"📅 Fechas [{fmt(loc['start'])} → {fmt(loc['end'])}]", expanded=expander_dates_open):
+                    st.session_state[expander_dates_key] = True
+                    
                     with st.form(key=f"edit_dates_{loc_id}"):
                         st.subheader("Editar fechas del envío")
                         
@@ -1645,7 +1637,15 @@ elif st.session_state.menu == "Almacén":
                                             feedback_placeholder.empty()
                                             show_feedback('error', f"Error al actualizar: {update_response.status_code}", duration=3)
                 
-                with st.expander(f"🥽 Dispositivos [{len(assigned)} asignados]", expanded=False):
+                if not expander_dates_open:
+                    st.session_state[expander_dates_key] = False
+                
+                expander_devices_key = f"expander_devices_{loc_id}"
+                expander_devices_open = st.session_state.get(expander_devices_key, False)
+                
+                with st.expander(f"🥽 Dispositivos [{len(assigned)} asignados]", expanded=expander_devices_open):
+                    st.session_state[expander_devices_key] = True
+                    
                     if len(assigned) == 0:
                         st.warning("Este envío no tiene dispositivos asignados")
                         
@@ -1670,50 +1670,67 @@ elif st.session_state.menu == "Almacén":
                                 with cols[1]:
                                     if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
                                         confirm_remove_device(d["Name"], lname, d["id"])
+                    
+                    expander_add_key = f"expander_add_{loc_id}"
+                    expander_add_open = st.session_state.get(expander_add_key, False)
+                    
+                    with st.expander(f"➕ Añadir más dispositivos [{len(can_add)} disponibles]", expanded=expander_add_open):
+                        st.session_state[expander_add_key] = True
+                        
+                        can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
+                        
+                        checkbox_keys = []
+                        
+                        with st.container(height=400, border=True):
+                            for d in can_add_filtered:
+                                key = f"add_{loc_id}_{d['id']}"
+                                checkbox_keys.append(key)
+                                
+                                subtitle = get_location_types_for_device(d, locations_map)
+                                
+                                cols = st.columns([0.5, 9.5])
+                                
+                                with cols[0]:
+                                    st.checkbox("", key=key)
+                                
+                                with cols[1]:
+                                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                    card(
+                                        d["Name"],
+                                        location_types=subtitle,
+                                        selected=st.session_state.get(key, False),
+                                        incident_counts=(inc["active"], inc["total"])
+                                    )
+                        
+                        selected_ids = [
+                            key.split("_")[-1]
+                            for key in checkbox_keys
+                            if st.session_state.get(key, False)
+                        ]
+                        
+                        sel_count = len(selected_ids)
+                        
+                        if sel_count > 0:
+                            cols_bottom = st.columns([7, 3])
+                            
+                            with cols_bottom[0]:
+                                counter_badge(sel_count, len(can_add_filtered))
+                            
+                            with cols_bottom[1]:
+                                if st.button("Añadir", key=f"assign_btn_{loc_id}", use_container_width=True):
+                                    confirm_add_devices(lname, sel_count, loc_id, selected_ids)
+                    
+                    if not expander_add_open:
+                        st.session_state[expander_add_key] = False
                 
-                with st.expander(f"➕ Añadir dispositivos [{len(can_add)} disponibles]", expanded=False):
-                    can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
-                    
-                    checkbox_keys = []
-                    
-                    with st.container(height=400, border=True):
-                        for d in can_add_filtered:
-                            key = f"add_{loc_id}_{d['id']}"
-                            checkbox_keys.append(key)
-                            
-                            subtitle = get_location_types_for_device(d, locations_map)
-                            
-                            cols = st.columns([0.5, 9.5])
-                            
-                            with cols[0]:
-                                st.checkbox("", key=key)
-                            
-                            with cols[1]:
-                                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                                card(
-                                    d["Name"],
-                                    location_types=subtitle,
-                                    selected=st.session_state.get(key, False),
-                                    incident_counts=(inc["active"], inc["total"])
-                                )
-                    
-                    selected_ids = [
-                        key.split("_")[-1]
-                        for key in checkbox_keys
-                        if st.session_state.get(key, False)
-                    ]
-                    
-                    sel_count = len(selected_ids)
-                    
-                    if sel_count > 0:
-                        cols_bottom = st.columns([7, 3])
-                        
-                        with cols_bottom[0]:
-                            counter_badge(sel_count, len(can_add_filtered))
-                        
-                        with cols_bottom[1]:
-                            if st.button("Añadir", key=f"assign_btn_{loc_id}", use_container_width=True):
-                                confirm_add_devices(lname, sel_count, loc_id, selected_ids)
+                if not expander_devices_open:
+                    st.session_state[expander_devices_key] = False
+               
+                includes_headphones = st.checkbox(
+                    "🎧 Incluye cascos",
+                    value=st.session_state.get(f"headphones_{loc_id}", False),
+                    key=f"headphones_{loc_id}"
+                )
     
     
     # ==================== SUBTAB 2: ENVÍOS ACTIVOS ====================
