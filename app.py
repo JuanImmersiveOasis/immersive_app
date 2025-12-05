@@ -33,20 +33,27 @@ st.markdown("""
         transform: translateY(0px);
     }
     
-    /* Botones de formulario */
     .stFormSubmitButton > button {
-        background-color: #919D9D;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-weight: 600;
+    background-color: #00859b;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    transition: all 0.2s ease;
     }
-    
+
     .stFormSubmitButton > button:hover {
-        background-color: #818282;
+        background-color: #006d82;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
     }
-    </style>
-    """, unsafe_allow_html=True)
+
+    .stFormSubmitButton > button:active {
+        background-color: #005565;
+        transform: translateY(0px);
+    }
+        </style>
+        """, unsafe_allow_html=True)
 
 
 try:
@@ -502,6 +509,8 @@ def load_future_client_locations():
         })
     
     return out
+
+
 
 @st.cache_data(ttl=600)
 def load_inhouse():
@@ -1111,6 +1120,61 @@ elif st.session_state.menu == "Próximos Envíos":
             with st.expander(f"{lname} ({start} → {end})", expanded=is_expanded):
                 st.session_state[expander_key] = True
                 
+                with st.form(key=f"edit_dates_{loc_id}"):
+                    st.subheader("Fechas del envío")
+                    
+                    col_start, col_end = st.columns(2)
+                    
+                    with col_start:
+                        current_start = iso_to_date(loc["start"])
+                        new_start = st.date_input(
+                            "Fecha salida",
+                            value=current_start,
+                            key=f"new_start_{loc_id}"
+                        )
+                    
+                    with col_end:
+                        current_end = iso_to_date(loc["end"]) if loc["end"] else None
+                        new_end = st.date_input(
+                            "Fecha regreso",
+                            value=current_end if current_end else date.today(),
+                            key=f"new_end_{loc_id}"
+                        )
+                    
+                    submit_dates = st.form_submit_button("Cambiar fechas", use_container_width=True)
+                    
+                    if submit_dates:
+                        if new_start > new_end:
+                            show_feedback('error', "La fecha de salida no puede ser posterior a la de regreso", duration=3)
+                        else:
+                            with st.sidebar:
+                                with st.spinner("Actualizando fechas..."):
+                                    update_response = requests.patch(
+                                        f"https://api.notion.com/v1/pages/{loc_id}",
+                                        headers=headers,
+                                        json={
+                                            "properties": {
+                                                "Start Date": {"date": {"start": new_start.isoformat()}},
+                                                "End Date": {"date": {"start": new_end.isoformat()}}
+                                            }
+                                        }
+                                    )
+                                    
+                                    if update_response.status_code == 200:
+                                        load_future_client_locations.clear()
+                                        q.clear()
+                                        preload_all_data.clear()
+                                        
+                                        st.session_state[expander_key] = True
+                                        
+                                        show_feedback('success', "Fechas actualizadas correctamente", duration=1.5)
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        show_feedback('error', f"Error al actualizar: {update_response.status_code}", duration=3)
+
+                    st.markdown("---")
+
                 assigned = [
                     d for d in devices
                     if loc_id in d["location_ids"]
