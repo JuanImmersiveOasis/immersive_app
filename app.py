@@ -11,7 +11,6 @@ st.set_page_config(page_title="Logistica", page_icon=None, layout="wide")
 
 st.markdown("""
     <style>
-    /* Botones principales */
     .stButton > button {
         background-color: #00859b;
         color: white;
@@ -34,26 +33,26 @@ st.markdown("""
     }
     
     .stFormSubmitButton > button {
-    background-color: #00859b;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+        background-color: #00859b;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        transition: all 0.2s ease;
     }
-
+    
     .stFormSubmitButton > button:hover {
         background-color: #006d82;
         transform: translateY(-1px);
         box-shadow: 0 2px 4px rgba(0,0,0,0.15);
     }
-
+    
     .stFormSubmitButton > button:active {
         background-color: #005565;
         transform: translateY(0px);
     }
-        </style>
-        """, unsafe_allow_html=True)
+    </style>
+    """, unsafe_allow_html=True)
 
 
 try:
@@ -81,28 +80,30 @@ headers = {
 
 PREFERRED_TAG_ORDER = ["Ultra", "Neo 4", "Quest 2", "Quest 3", "Quest 3S", "Vision Pro"]
 
+
+# ==================== HELPER FUNCTIONS ====================
+
 def show_feedback(message_type, message, duration=None):
-    with st.sidebar:
-        placeholder = st.empty()
-        
-        with placeholder.container():
-            if message_type == 'success':
-                st.success(message, icon="✅")
-            elif message_type == 'error':
-                st.error(message)
-            elif message_type == 'warning':
-                st.warning(message)
-            elif message_type == 'info':
-                st.info(message)
-            elif message_type == 'spinner':
-                with st.spinner(message):
-                    return placeholder
-        
-        if duration:
-            time.sleep(duration)
-            placeholder.empty()
-        
-        return placeholder
+    placeholder = st.empty()
+    
+    with placeholder.container():
+        if message_type == 'success':
+            st.success(message, icon="✅")
+        elif message_type == 'error':
+            st.error(message)
+        elif message_type == 'warning':
+            st.warning(message)
+        elif message_type == 'info':
+            st.info(message)
+        elif message_type == 'spinner':
+            with st.spinner(message):
+                return placeholder
+    
+    if duration:
+        time.sleep(duration)
+        placeholder.empty()
+    
+    return placeholder
 
 def iso_to_date(s):
     try:
@@ -123,7 +124,7 @@ def fmt_datetime(date_str):
         return dt.strftime("%d/%m/%Y %H:%M")
     except:
         return date_str if date_str else "Sin fecha"
-    
+
 def format_relative_date(date_obj):
     today = date.today()
     days_diff = (date_obj - today).days
@@ -143,7 +144,7 @@ def format_relative_date(date_obj):
     elif 7 <= days_diff <= 13:
         return f"el {day_name} que viene, día {day_num}"
     elif -7 <= days_diff <= -2:
-        return f"el {day_name}, día {day_num}"
+        return f"el {day_name} pasado, día {day_num}"
     elif days_diff < -7:
         weeks_ago = abs(days_diff) // 7
         if weeks_ago == 1:
@@ -208,9 +209,15 @@ def assign_device(dev_id, loc_id):
     )
     load_devices.clear()
     load_future_client_locations.clear()
+    load_active_client_locations.clear()
+    load_pending_reception_locations.clear()
+    load_historic_client_locations.clear()
     q.clear()
     preload_all_data.clear()
     return response
+
+
+# ==================== UI COMPONENTS ====================
 
 def legend_button():
     st.markdown(
@@ -437,6 +444,9 @@ def counter_badge(selected, total):
         unsafe_allow_html=True
     )
 
+
+# ==================== DATA LOADING FUNCTIONS ====================
+
 @st.cache_data(ttl=600)
 def load_locations_map():
     results = q(LOCATIONS_ID)
@@ -520,7 +530,7 @@ def load_future_client_locations():
             continue
         
         sd = props["Start Date"]["date"]["start"] if props.get("Start Date") and props["Start Date"]["date"] else None
-        if not sd or iso_to_date(sd) < today:
+        if not sd or iso_to_date(sd) <= today:
             continue
         
         try:
@@ -540,9 +550,65 @@ def load_future_client_locations():
     return out
 
 @st.cache_data(ttl=300)
-def load_past_client_locations():
+def load_active_client_locations():
     today = date.today()
-    fifteen_days_ago = today - timedelta(days=15)
+    results = q(LOCATIONS_ID)
+    devices = load_devices()
+    out = []
+    
+    for p in results:
+        props = p["properties"]
+        
+        try:
+            t = props["Type"]["select"]["name"]
+        except:
+            t = None
+        
+        if t != "Client":
+            continue
+        
+        sd = props["Start Date"]["date"]["start"] if props.get("Start Date") and props["Start Date"]["date"] else None
+        ed = props["End Date"]["date"]["start"] if props.get("End Date") and props["End Date"]["date"] else None
+        
+        if not sd or not ed:
+            continue
+        
+        start_date = iso_to_date(sd)
+        end_date = iso_to_date(ed)
+        
+        if not (start_date <= today <= end_date):
+            continue
+        
+        try:
+            name = props["Name"]["title"][0]["text"]["content"]
+        except:
+            name = "Sin nombre"
+        
+        loc_id = p["id"]
+        device_count = sum(1 for d in devices if loc_id in d["location_ids"])
+        
+        days_since_start = (today - start_date).days
+        days_until_end = (end_date - today).days
+        
+        out.append({
+            "id": loc_id,
+            "name": name,
+            "start": sd,
+            "end": ed,
+            "device_count": device_count,
+            "start_date_obj": start_date,
+            "end_date_obj": end_date,
+            "days_since_start": days_since_start,
+            "days_until_end": days_until_end
+        })
+    
+    out = sorted(out, key=lambda x: x["days_until_end"])
+    
+    return out
+
+@st.cache_data(ttl=300)
+def load_pending_reception_locations():
+    today = date.today()
     results = q(LOCATIONS_ID)
     devices = load_devices()
     historic = q(HISTORIC_ID)
@@ -565,7 +631,63 @@ def load_past_client_locations():
         
         end_date = iso_to_date(ed)
         
-        if end_date >= today or end_date < fifteen_days_ago:
+        if end_date >= today:
+            continue
+        
+        try:
+            name = props["Name"]["title"][0]["text"]["content"]
+        except:
+            name = "Sin nombre"
+        
+        sd = props["Start Date"]["date"]["start"] if props.get("Start Date") and props["Start Date"]["date"] else None
+        
+        loc_id = p["id"]
+        
+        currently_assigned = sum(1 for d in devices if loc_id in d["location_ids"])
+        
+        if currently_assigned == 0:
+            continue
+        
+        out.append({
+            "id": loc_id,
+            "name": name,
+            "start": sd,
+            "end": ed,
+            "device_count": currently_assigned,
+            "end_date_obj": end_date
+        })
+    
+    out = sorted(out, key=lambda x: x["end_date_obj"])
+    
+    return out
+
+@st.cache_data(ttl=300)
+def load_historic_client_locations():
+    today = date.today()
+    thirty_days_ago = today - timedelta(days=30)
+    results = q(LOCATIONS_ID)
+    devices = load_devices()
+    historic = q(HISTORIC_ID)
+    out = []
+    
+    for p in results:
+        props = p["properties"]
+        
+        try:
+            t = props["Type"]["select"]["name"]
+        except:
+            t = None
+        
+        if t != "Client":
+            continue
+        
+        ed = props["End Date"]["date"]["start"] if props.get("End Date") and props["End Date"]["date"] else None
+        if not ed:
+            continue
+        
+        end_date = iso_to_date(ed)
+        
+        if end_date >= today or end_date < thirty_days_ago:
             continue
         
         try:
@@ -580,11 +702,19 @@ def load_past_client_locations():
         currently_assigned = sum(1 for d in devices if loc_id in d["location_ids"])
         
         historic_count = 0
+        checkin_date = None
         for entry in historic:
             hist_props = entry["properties"]
             hist_loc = hist_props.get("Location", {}).get("relation", [])
             if hist_loc and hist_loc[0]["id"] == loc_id:
                 historic_count += 1
+                if not checkin_date:
+                    checkin_prop = hist_props.get("Check In", {}).get("date", {})
+                    if checkin_prop:
+                        checkin_date = checkin_prop.get("start")
+        
+        if currently_assigned == 0 and historic_count == 0:
+            continue
         
         device_count = currently_assigned + historic_count
         
@@ -594,7 +724,9 @@ def load_past_client_locations():
             "start": sd,
             "end": ed,
             "device_count": device_count,
-            "end_date_obj": end_date
+            "end_date_obj": end_date,
+            "checkin_date": checkin_date,
+            "has_pending": currently_assigned > 0
         })
     
     out = sorted(out, key=lambda x: x["end_date_obj"], reverse=True)
@@ -824,7 +956,9 @@ def preload_all_data():
         'locations_map': load_locations_map(),
         'devices': load_devices(),
         'future_locations': load_future_client_locations(),
-        'past_locations': load_past_client_locations(),
+        'active_locations': load_active_client_locations(),
+        'pending_locations': load_pending_reception_locations(),
+        'historic_locations': load_historic_client_locations(),
         'inhouse': load_inhouse(),
         'office_id': office_id(),
         'active_incidents': load_active_incidents(),
@@ -834,60 +968,34 @@ def preload_all_data():
     }
     return data
 
+
+# ==================== SESSION STATE INITIALIZATION ====================
+
 for key, default in [
     ("tab1_show", False),
     ("sel1", []),
     ("sel2", []),
     ("sel3", []),
-    ("tab3_loc", None),
-    ("show_avail_tab3", False),
-    ("show_avail_home", False),
     ("processing_action", False)
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
 
+
+# ==================== LOAD DATA ====================
+
 with st.spinner("🔄 Cargando datos desde Notion..."):
     preloaded_data = preload_all_data()
 
-locations_map = preload_all_data()['locations_map']
+locations_map = preloaded_data['locations_map']
 all_devices = preloaded_data['devices']
 incidence_map = preloaded_data['incidence_map']
 
+
+# ==================== SIDEBAR MENU ====================
+
 with st.sidebar:
     st.image("img/logo.png", use_container_width=True)
-    
-    num_proximos = len(preloaded_data['future_locations'])
-    
-    today = date.today()
-    all_locs = preloaded_data['all_locations']
-    devices_tmp = all_devices
-    
-    finished = []
-    for p in all_locs:
-        props = p["properties"]
-        
-        if props.get("Type", {}).get("select", {}).get("name") != "Client":
-            continue
-        
-        end_prop = props.get("End Date")
-        if isinstance(end_prop, dict):
-            date_obj = end_prop.get("date")
-            ed = date_obj.get("start") if isinstance(date_obj, dict) else None
-        else:
-            ed = None
-        
-        if not ed or iso_to_date(ed) >= today:
-            continue
-        
-        loc_id = p["id"]
-        assigned = [d for d in devices_tmp if loc_id in d["location_ids"]]
-        if len(assigned) == 0:
-            continue
-        
-        finished.append(p)
-    
-    num_finished = len(finished)
     
     num_incidencias = len(preloaded_data['active_incidents'])
     
@@ -902,17 +1010,15 @@ with st.sidebar:
     opciones_menu = [
         create_menu_label("Disponibles para Alquilar", 0),
         create_menu_label("Gafas en casa", 0),
-        create_menu_label("Próximos Envíos", num_proximos),
-        create_menu_label("Check-In", num_finished),
+        create_menu_label("Almacén", 0),
         create_menu_label("Incidencias", num_incidencias)
     ]
     
     menu_mapping = {
         opciones_menu[0]: "Disponibles para Alquilar",
         opciones_menu[1]: "Gafas en casa",
-        opciones_menu[2]: "Próximos Envíos",
-        opciones_menu[3]: "Check-In",
-        opciones_menu[4]: "Incidencias"
+        opciones_menu[2]: "Almacén",
+        opciones_menu[3]: "Incidencias"
     }
     
     reverse_mapping = {v: k for k, v in menu_mapping.items()}
@@ -936,9 +1042,15 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
+
+# ==================== FORCE INCIDENTS TAB ====================
+
 if "force_incidents_tab" in st.session_state and st.session_state.force_incidents_tab:
     st.session_state.menu = "Incidencias"
     st.session_state.force_incidents_tab = False
+
+
+# ==================== TAB 1: DISPONIBLES PARA ALQUILAR ====================
 
 if st.session_state.menu == "Disponibles para Alquilar":
     st.title("Disponibles para Alquilar")
@@ -990,65 +1102,67 @@ if st.session_state.menu == "Disponibles para Alquilar":
         ]
         sel_count = len(st.session_state.sel1)
         
-        with st.sidebar:
+        if sel_count > 0:
             counter_badge(sel_count, len(avail_filtered))
             
-            if sel_count > 0:
-                with st.form("form_assign_client"):
-                    client = st.text_input("Nombre Cliente")
-                    submit = st.form_submit_button("Asignar Cliente", use_container_width=True)
-                    
-                    if submit:
-                        if not client or client.strip() == "":
-                            show_feedback('error', "Debes escribir el nombre del cliente", duration=2)
-                        else:
-                            feedback_placeholder = st.empty()
-                            with feedback_placeholder:
-                                with st.spinner("Asignando dispositivos..."):
-                                    response = requests.post(
-                                        "https://api.notion.com/v1/pages", 
-                                        headers=headers,
-                                        json={
-                                            "parent": {"database_id": LOCATIONS_ID},
-                                            "properties": {
-                                                "Name": {"title": [{"text": {"content": client}}]},
-                                                "Type": {"select": {"name": "Client"}},
-                                                "Start Date": {"date": {"start": start.isoformat()}},
-                                                "End Date": {"date": {"start": end.isoformat()}}
-                                            }
+            with st.form("form_assign_client"):
+                client = st.text_input("Nombre Cliente")
+                submit = st.form_submit_button("Asignar Cliente", use_container_width=True)
+                
+                if submit:
+                    if not client or client.strip() == "":
+                        show_feedback('error', "Debes escribir el nombre del cliente", duration=2)
+                    else:
+                        feedback_placeholder = st.empty()
+                        with feedback_placeholder:
+                            with st.spinner("Asignando dispositivos..."):
+                                response = requests.post(
+                                    "https://api.notion.com/v1/pages", 
+                                    headers=headers,
+                                    json={
+                                        "parent": {"database_id": LOCATIONS_ID},
+                                        "properties": {
+                                            "Name": {"title": [{"text": {"content": client}}]},
+                                            "Type": {"select": {"name": "Client"}},
+                                            "Start Date": {"date": {"start": start.isoformat()}},
+                                            "End Date": {"date": {"start": end.isoformat()}}
                                         }
-                                    )
+                                    }
+                                )
+                                
+                                if response.status_code == 200:
+                                    new_loc_id = response.json()["id"]
                                     
-                                    if response.status_code == 200:
-                                        new_loc_id = response.json()["id"]
-                                        
-                                        success_count = 0
-                                        for did in st.session_state.sel1:
-                                            resp = assign_device(did, new_loc_id)
-                                            if resp.status_code == 200:
-                                                success_count += 1
-                                        
-                                        st.session_state.sel1 = []
-                                        for key in list(st.session_state.keys()):
-                                            if key.startswith("a_"):
-                                                del st.session_state[key]
-                                        
-                                        load_devices.clear()
-                                        load_future_client_locations.clear()
-                                        load_locations_map.clear()
-                                        q.clear()
-                                        preload_all_data.clear()
-                                        
-                                        feedback_placeholder.empty()
-                                        show_feedback('success', f"{success_count} dispositivos asignados correctamente", duration=1.5)
-                                        
-                                        time.sleep(1.5)
-                                        st.rerun()
-                                        st.stop()
-                                    else:
-                                        feedback_placeholder.empty()
-                                        show_feedback('error', f"Error al crear ubicación: {response.status_code}", duration=3)
-                                        st.stop()
+                                    success_count = 0
+                                    for did in st.session_state.sel1:
+                                        resp = assign_device(did, new_loc_id)
+                                        if resp.status_code == 200:
+                                            success_count += 1
+                                    
+                                    st.session_state.sel1 = []
+                                    for key in list(st.session_state.keys()):
+                                        if key.startswith("a_"):
+                                            del st.session_state[key]
+                                    
+                                    load_devices.clear()
+                                    load_future_client_locations.clear()
+                                    load_locations_map.clear()
+                                    q.clear()
+                                    preload_all_data.clear()
+                                    
+                                    feedback_placeholder.empty()
+                                    show_feedback('success', f"{success_count} dispositivos asignados correctamente", duration=1.5)
+                                    
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                    st.stop()
+                                else:
+                                    feedback_placeholder.empty()
+                                    show_feedback('error', f"Error al crear ubicación: {response.status_code}", duration=3)
+                                    st.stop()
+
+
+# ==================== TAB 2: GAFAS EN CASA ====================
 
 elif st.session_state.menu == "Gafas en casa":
     st.title("Gafas en casa")
@@ -1100,7 +1214,8 @@ elif st.session_state.menu == "Gafas en casa":
                             if st.button("Devolver", key=f"rm_{d['id']}", use_container_width=True):
                                 if not st.session_state.processing_action:
                                     st.session_state.processing_action = True
-                                    with st.sidebar:
+                                    feedback_placeholder = st.empty()
+                                    with feedback_placeholder:
                                         with st.spinner("Moviendo a oficina..."):
                                             resp = assign_device(d["id"], oid)
                                             
@@ -1108,9 +1223,13 @@ elif st.session_state.menu == "Gafas en casa":
                                                 load_devices.clear()
                                                 preload_all_data.clear()
                                                 st.session_state.processing_action = False
+                                                feedback_placeholder.empty()
+                                                show_feedback('success', "Dispositivo devuelto a oficina", duration=1.5)
+                                                time.sleep(1.5)
                                                 st.rerun()
                                             else:
                                                 st.session_state.processing_action = False
+                                                feedback_placeholder.empty()
                                                 show_feedback('error', f"Error: {resp.status_code}", duration=2)
     
     office_devices = [
@@ -1151,151 +1270,370 @@ elif st.session_state.menu == "Gafas en casa":
         sel_count = len(st.session_state.sel2)
         
         if sel_count > 0:
-            with st.sidebar:
-                counter_badge(sel_count, len(office_filtered))
-                
-                dest = st.selectbox("Asignar a:", [x["name"] for x in inh], key="dest_person")
-                dest_id = next(x["id"] for x in inh if x["name"] == dest)
-                
-                if st.button("Asignar seleccionadas", use_container_width=True):
-                    feedback_placeholder = st.empty()
-                    with feedback_placeholder:
-                        with st.spinner("Asignando dispositivos..."):
-                            success_count = 0
-                            for did in st.session_state.sel2:
-                                resp = assign_device(did, dest_id)
-                                if resp.status_code == 200:
-                                    success_count += 1
-                            
-                            st.session_state.sel2 = []
-                            for key in list(st.session_state.keys()):
-                                if key.startswith("o_"):
-                                    del st.session_state[key]
-                            
-                            st.session_state.expander_office_open = False
-                            
-                            load_devices.clear()
-                            preload_all_data.clear()
-                            
-                            feedback_placeholder.empty()
-                            show_feedback('success', f"{success_count} dispositivos asignados", duration=1.5)
-                            time.sleep(1.5)
-                            st.rerun()
+            counter_badge(sel_count, len(office_filtered))
+            
+            dest = st.selectbox("Asignar a:", [x["name"] for x in inh], key="dest_person")
+            dest_id = next(x["id"] for x in inh if x["name"] == dest)
+            
+            if st.button("Asignar seleccionadas", use_container_width=True):
+                feedback_placeholder = st.empty()
+                with feedback_placeholder:
+                    with st.spinner("Asignando dispositivos..."):
+                        success_count = 0
+                        for did in st.session_state.sel2:
+                            resp = assign_device(did, dest_id)
+                            if resp.status_code == 200:
+                                success_count += 1
+                        
+                        st.session_state.sel2 = []
+                        for key in list(st.session_state.keys()):
+                            if key.startswith("o_"):
+                                del st.session_state[key]
+                        
+                        st.session_state.expander_office_open = False
+                        
+                        load_devices.clear()
+                        preload_all_data.clear()
+                        
+                        feedback_placeholder.empty()
+                        show_feedback('success', f"{success_count} dispositivos asignados", duration=1.5)
+                        time.sleep(1.5)
+                        st.rerun()
     
     if not expander_office_open:
         st.session_state.expander_office_open = False
 
-elif st.session_state.menu == "Próximos Envíos":
-    st.title("Próximos Envíos")
+
+# ==================== TAB 3: ALMACÉN ====================
+
+elif st.session_state.menu == "Almacén":
+    st.title("📦 Almacén")
     legend_button()
     
     future_locs = preloaded_data['future_locations']
-    past_locs = preloaded_data['past_locations']
+    active_locs = preloaded_data['active_locations']
+    pending_locs = preloaded_data['pending_locations']
+    historic_locs = preloaded_data['historic_locations']
     
-    with st.expander(f"Envíos futuros ({len(future_locs)})", expanded=True):
+    tab1, tab2, tab3 = st.tabs(["🚀 Próximos", "✅ Activos", "📬 Recepcionar"])
+    
+    
+    # ==================== SUBTAB 1: PRÓXIMOS ENVÍOS ====================
+    
+    with tab1:
         if len(future_locs) == 0:
-            st.info("No hay envíos futuros.")
+            st.info("No hay envíos próximos.")
         else:
-            for loc in future_locs:
-                lname = loc["name"]
-                start = fmt(loc["start"])
-                end = fmt(loc["end"])
-                loc_id = loc["id"]
+            envio_options = ["Seleccionar envío..."] + [
+                f"📦 {x['name']} ({fmt(x['start'])} → {fmt(x['end'])})" 
+                for x in future_locs
+            ]
+            
+            selected = st.selectbox(
+                "Selecciona un envío para gestionar:",
+                envio_options,
+                key="future_envio_select"
+            )
+            
+            if selected != "Seleccionar envío...":
+                idx = envio_options.index(selected) - 1
+                loc = future_locs[idx]
                 
+                lname = loc["name"]
+                loc_id = loc["id"]
                 devices = all_devices
                 
-                expander_key = f"expander_loc_{loc_id}"
-                is_expanded = st.session_state.get(expander_key, False)
+                st.markdown("---")
                 
-                with st.expander(f"{lname} ({start} → {end})", expanded=is_expanded):
-                    st.session_state[expander_key] = True
+                with st.form(key=f"edit_dates_{loc_id}"):
+                    st.subheader("📅 Editar fechas del envío")
                     
-                    with st.form(key=f"edit_dates_{loc_id}"):
-                        st.subheader("📅 Editar fechas del envío")
-                        
-                        col_start, col_end = st.columns(2)
-                        
-                        with col_start:
-                            current_start = iso_to_date(loc["start"])
-                            new_start = st.date_input(
-                                "Fecha salida",
-                                value=current_start,
-                                key=f"new_start_{loc_id}"
-                            )
-                        
-                        with col_end:
-                            current_end = iso_to_date(loc["end"]) if loc["end"] else None
-                            new_end = st.date_input(
-                                "Fecha regreso",
-                                value=current_end if current_end else date.today(),
-                                key=f"new_end_{loc_id}"
-                            )
-                        
-                        submit_dates = st.form_submit_button("Actualizar fechas", use_container_width=True)
-                        
-                        if submit_dates:
-                            if new_start > new_end:
-                                show_feedback('error', "La fecha de salida no puede ser posterior a la de regreso", duration=3)
-                            else:
-                                with st.sidebar:
-                                    with st.spinner("Actualizando fechas..."):
-                                        update_response = requests.patch(
-                                            f"https://api.notion.com/v1/pages/{loc_id}",
-                                            headers=headers,
-                                            json={
-                                                "properties": {
-                                                    "Start Date": {"date": {"start": new_start.isoformat()}},
-                                                    "End Date": {"date": {"start": new_end.isoformat()}}
-                                                }
+                    col_start, col_end = st.columns(2)
+                    
+                    with col_start:
+                        current_start = iso_to_date(loc["start"])
+                        new_start = st.date_input(
+                            "Fecha salida",
+                            value=current_start,
+                            key=f"new_start_{loc_id}"
+                        )
+                    
+                    with col_end:
+                        current_end = iso_to_date(loc["end"]) if loc["end"] else None
+                        new_end = st.date_input(
+                            "Fecha regreso",
+                            value=current_end if current_end else date.today(),
+                            key=f"new_end_{loc_id}"
+                        )
+                    
+                    submit_dates = st.form_submit_button("Actualizar fechas", use_container_width=True)
+                    
+                    if submit_dates:
+                        if new_start > new_end:
+                            show_feedback('error', "La fecha de salida no puede ser posterior a la de regreso", duration=3)
+                        else:
+                            feedback_placeholder = st.empty()
+                            with feedback_placeholder:
+                                with st.spinner("Actualizando fechas..."):
+                                    update_response = requests.patch(
+                                        f"https://api.notion.com/v1/pages/{loc_id}",
+                                        headers=headers,
+                                        json={
+                                            "properties": {
+                                                "Start Date": {"date": {"start": new_start.isoformat()}},
+                                                "End Date": {"date": {"start": new_end.isoformat()}}
                                             }
-                                        )
+                                        }
+                                    )
+                                    
+                                    if update_response.status_code == 200:
+                                        load_future_client_locations.clear()
+                                        q.clear()
+                                        preload_all_data.clear()
                                         
-                                        if update_response.status_code == 200:
-                                            load_future_client_locations.clear()
-                                            q.clear()
-                                            preload_all_data.clear()
-                                            
-                                            st.session_state[expander_key] = True
-                                            
-                                            show_feedback('success', "Fechas actualizadas correctamente", duration=1.5)
-                                            time.sleep(1.5)
-                                            st.rerun()
-                                        else:
-                                            show_feedback('error', f"Error al actualizar: {update_response.status_code}", duration=3)
+                                        feedback_placeholder.empty()
+                                        show_feedback('success', "Fechas actualizadas correctamente", duration=1.5)
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        feedback_placeholder.empty()
+                                        show_feedback('error', f"Error al actualizar: {update_response.status_code}", duration=3)
+                
+                st.markdown("---")
+                
+                assigned = [
+                    d for d in devices
+                    if loc_id in d["location_ids"]
+                ]
+                
+                if len(assigned) == 0:
+                    st.warning("Este envío no tiene dispositivos asignados")
+                    
+                    if st.button("Borrar envío", key=f"delete_loc_{loc_id}", use_container_width=True):
+                        feedback_placeholder = st.empty()
+                        with feedback_placeholder:
+                            with st.spinner("Eliminando envío..."):
+                                delete_response = requests.patch(
+                                    f"https://api.notion.com/v1/pages/{loc_id}",
+                                    headers=headers,
+                                    json={"archived": True}
+                                )
+                                
+                                if delete_response.status_code == 200:
+                                    load_future_client_locations.clear()
+                                    q.clear()
+                                    preload_all_data.clear()
+                                    feedback_placeholder.empty()
+                                    show_feedback('success', "Envío eliminado", duration=1.5)
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                else:
+                                    feedback_placeholder.empty()
+                                    show_feedback('error', f"Error al eliminar: {delete_response.status_code}", duration=3)
+                else:
+                    st.subheader("📋 Dispositivos asignados")
+                    
+                    assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
+                    
+                    with st.container(border=False):
+                        for d in assigned_filtered:
+                            cols = st.columns([8, 2])
+                            
+                            with cols[0]:
+                                subtitle = get_location_types_for_device(d, locations_map)
+                                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                card(
+                                    d["Name"],
+                                    location_types=subtitle,
+                                    incident_counts=(inc["active"], inc["total"])
+                                )
+                            
+                            with cols[1]:
+                                if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
+                                    if not st.session_state.processing_action:
+                                        st.session_state.processing_action = True
+                                        feedback_placeholder = st.empty()
+                                        with feedback_placeholder:
+                                            with st.spinner("Quitando dispositivo..."):
+                                                resp = assign_device(d["id"], office_id())
+                                                
+                                                if resp.status_code == 200:
+                                                    load_devices.clear()
+                                                    preload_all_data.clear()
+                                                    st.session_state.processing_action = False
+                                                    feedback_placeholder.empty()
+                                                    show_feedback('success', "Dispositivo quitado", duration=1.5)
+                                                    time.sleep(1.5)
+                                                    st.rerun()
+                                                else:
+                                                    st.session_state.processing_action = False
+                                                    feedback_placeholder.empty()
+                                                    show_feedback('error', f"Error: {resp.status_code}", duration=2)
                     
                     st.markdown("---")
+                    st.subheader("➕ Añadir más dispositivos")
                     
+                    ls = iso_to_date(loc["start"])
+                    le = iso_to_date(loc["end"])
+                    
+                    can_add = [
+                        d for d in devices
+                        if d.get("location_ids")
+                        and available(d, ls, le)
+                        and loc_id not in d["location_ids"]
+                    ]
+                    
+                    can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
+                    
+                    checkbox_keys = []
+                    
+                    with st.container(height=400, border=True):
+                        for d in can_add_filtered:
+                            key = f"add_{loc_id}_{d['id']}"
+                            checkbox_keys.append(key)
+                            
+                            subtitle = get_location_types_for_device(d, locations_map)
+                            
+                            cols = st.columns([0.5, 9.5])
+                            
+                            with cols[0]:
+                                st.checkbox("", key=key)
+                            
+                            with cols[1]:
+                                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                card(
+                                    d["Name"],
+                                    location_types=subtitle,
+                                    selected=st.session_state.get(key, False),
+                                    incident_counts=(inc["active"], inc["total"])
+                                )
+                    
+                    selected_ids = [
+                        key.split("_")[-1]
+                        for key in checkbox_keys
+                        if st.session_state.get(key, False)
+                    ]
+                    
+                    sel_count = len(selected_ids)
+                    
+                    if sel_count > 0:
+                        counter_badge(sel_count, len(can_add_filtered))
+                        
+                        if st.button(f"Añadir a {lname}", key=f"assign_btn_{loc_id}", use_container_width=True):
+                            feedback_placeholder = st.empty()
+                            with feedback_placeholder:
+                                with st.spinner("Añadiendo dispositivos..."):
+                                    success_count = 0
+                                    for did in selected_ids:
+                                        resp = assign_device(did, loc_id)
+                                        if resp.status_code == 200:
+                                            success_count += 1
+                                    
+                                    for key in checkbox_keys:
+                                        if key in st.session_state:
+                                            del st.session_state[key]
+                                    
+                                    load_devices.clear()
+                                    preload_all_data.clear()
+                                    
+                                    feedback_placeholder.empty()
+                                    show_feedback('success', f"{success_count} dispositivos añadidos", duration=1.5)
+                                    time.sleep(1.5)
+                                    st.rerun()
+    
+    
+    # ==================== SUBTAB 2: ENVÍOS ACTIVOS ====================
+    
+    with tab2:
+        if len(active_locs) == 0:
+            st.info("No hay envíos activos en este momento.")
+        else:
+            st.write(f"**{len(active_locs)} envío(s) activo(s)**")
+            
+            for loc in active_locs:
+                lname = loc["name"]
+                loc_id = loc["id"]
+                device_count = loc["device_count"]
+                days_since_start = loc["days_since_start"]
+                days_until_end = loc["days_until_end"]
+                
+                if days_since_start == 0:
+                    start_text = "Empezó hoy"
+                elif days_since_start == 1:
+                    start_text = "Empezó ayer"
+                else:
+                    start_text = f"Empezó hace {days_since_start} días"
+                
+                if days_until_end == 0:
+                    end_text = "termina hoy"
+                elif days_until_end == 1:
+                    end_text = "termina mañana"
+                else:
+                    end_text = f"quedan {days_until_end} días"
+                
+                with st.expander(f"✅ {lname} [{device_count}] ({start_text}, {end_text})", expanded=False):
+                    
+                    devices = all_devices
                     assigned = [
                         d for d in devices
                         if loc_id in d["location_ids"]
                     ]
                     
-                    if len(assigned) == 0:
-                        st.warning("Este envío no tiene dispositivos asignados")
+                    if len(assigned) > 0:
+                        st.caption("Dispositivos en uso:")
                         
-                        if st.button("Borrar envío", key=f"delete_loc_{loc_id}", use_container_width=True):
-                            with st.sidebar:
-                                with st.spinner("Eliminando envío..."):
-                                    delete_response = requests.patch(
-                                        f"https://api.notion.com/v1/pages/{loc_id}",
-                                        headers=headers,
-                                        json={"archived": True}
-                                    )
-                                    
-                                    if delete_response.status_code == 200:
-                                        load_future_client_locations.clear()
-                                        q.clear()
-                                        preload_all_data.clear()
-                                        st.rerun()
-                                    else:
-                                        show_feedback('error', f"Error al eliminar: {delete_response.status_code}", duration=3)
-                    else:
-                        st.subheader("Dispositivos asignados")
-                        
-                        assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"assigned_{loc_id}")
+                        assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"active_assigned_{loc_id}")
                         
                         with st.container(border=False):
                             for d in assigned_filtered:
+                                subtitle = get_location_types_for_device(d, locations_map)
+                                inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                card(
+                                    d["Name"],
+                                    location_types=subtitle,
+                                    incident_counts=(inc["active"], inc["total"])
+                                )
+    
+    
+    # ==================== SUBTAB 3: RECEPCIONAR + HISTÓRICO ====================
+    
+    with tab3:
+        
+        with st.expander(f"📬 Pendientes de recepcionar ({len(pending_locs)})", expanded=True):
+            if len(pending_locs) == 0:
+                st.info("No hay envíos pendientes de recepcionar.")
+            else:
+                for loc in pending_locs:
+                    lname = loc["name"]
+                    loc_id = loc["id"]
+                    device_count = loc["device_count"]
+                    end_date_obj = loc["end_date_obj"]
+                    
+                    relative_date = format_relative_date(end_date_obj)
+                    
+                    days_late = (date.today() - end_date_obj).days
+                    
+                    if days_late == 0:
+                        status_icon = "⚠️"
+                    elif days_late <= 2:
+                        status_icon = "⚠️"
+                    else:
+                        status_icon = "🔴"
+                    
+                    with st.expander(f"{status_icon} {lname} [{device_count}] (Terminó {relative_date})", expanded=False):
+                        
+                        devices = all_devices
+                        office = office_id()
+                        
+                        assigned = [
+                            d for d in devices
+                            if loc_id in d["location_ids"]
+                        ]
+                        
+                        st.caption(f"Dispositivos pendientes de recepcionar:")
+                        
+                        with st.container(border=False):
+                            for d in assigned:
                                 cols = st.columns([8, 2])
                                 
                                 with cols[0]:
@@ -1308,291 +1646,114 @@ elif st.session_state.menu == "Próximos Envíos":
                                     )
                                 
                                 with cols[1]:
-                                    if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
+                                    if st.button("Check-In", key=f"checkin_{d['id']}", use_container_width=True):
                                         if not st.session_state.processing_action:
                                             st.session_state.processing_action = True
-                                            with st.sidebar:
-                                                with st.spinner("Quitando dispositivo..."):
-                                                    resp = assign_device(d["id"], office_id())
+                                            feedback_placeholder = st.empty()
+                                            with feedback_placeholder:
+                                                with st.spinner("Procesando Check-In..."):
+                                                    payload = {
+                                                        "parent": {"database_id": HISTORIC_ID},
+                                                        "properties": {
+                                                            "Name": {"title": [{"text": {"content": d['Name']}}]},
+                                                            "Tags": {"select": {"name": d["Tags"]}} if d.get("Tags") else None,
+                                                            "SN": {"rich_text": [{"text": {"content": d.get("SN", "")}}]},
+                                                            "Location": {"relation": [{"id": loc_id}]},
+                                                            "Start Date": {"date": {"start": d["Start"]}} if d.get("Start") else None,
+                                                            "End Date": {"date": {"start": d["End"]}} if d.get("End") else None,
+                                                            "Check In": {"date": {"start": date.today().isoformat()}}
+                                                        }
+                                                    }
                                                     
-                                                    if resp.status_code == 200:
-                                                        load_devices.clear()
-                                                        preload_all_data.clear()
-                                                        st.session_state[expander_key] = True
+                                                    payload["properties"] = {
+                                                        k: v for k, v in payload["properties"].items() if v is not None
+                                                    }
+                                                    
+                                                    r = requests.post(
+                                                        "https://api.notion.com/v1/pages",
+                                                        headers=headers,
+                                                        json=payload
+                                                    )
+                                                    
+                                                    if r.status_code != 200:
                                                         st.session_state.processing_action = False
-                                                        st.rerun()
+                                                        feedback_placeholder.empty()
+                                                        show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
                                                     else:
-                                                        st.session_state.processing_action = False
-                                                        show_feedback('error', f"Error: {resp.status_code}", duration=2)
+                                                        resp = assign_device(d["id"], office)
+                                                        
+                                                        if resp.status_code == 200:
+                                                            load_devices.clear()
+                                                            q.clear()
+                                                            preload_all_data.clear()
+                                                            st.session_state.processing_action = False
+                                                            feedback_placeholder.empty()
+                                                            show_feedback('success', "Check-in completado", duration=1.5)
+                                                            time.sleep(1.5)
+                                                            st.rerun()
+                                                        else:
+                                                            st.session_state.processing_action = False
+                                                            feedback_placeholder.empty()
+                                                            show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
+        
+        
+        with st.expander(f"📚 Histórico (últimos 30 días) ({len(historic_locs)})", expanded=False):
+            if len(historic_locs) == 0:
+                st.info("No hay envíos en el histórico de los últimos 30 días.")
+            else:
+                for loc in historic_locs:
+                    lname = loc["name"]
+                    loc_id = loc["id"]
+                    device_count = loc["device_count"]
+                    end_date_obj = loc["end_date_obj"]
+                    checkin_date = loc.get("checkin_date")
+                    has_pending = loc.get("has_pending", False)
                     
-                    add_expander_key = f"add_expander_{loc_id}"
-                    add_expanded = st.session_state.get(add_expander_key, False)
+                    relative_date = format_relative_date(end_date_obj)
                     
-                    with st.expander("Más gafas disponibles", expanded=add_expanded):
-                        
-                        ls = iso_to_date(loc["start"])
-                        le = iso_to_date(loc["end"])
-                        
-                        can_add = [
-                            d for d in devices
-                            if d.get("location_ids")
-                            and available(d, ls, le)
-                            and loc_id not in d["location_ids"]
-                        ]
-                        
-                        can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
-                        
-                        checkbox_keys = []
-                        
-                        with st.container(height=400, border=True):
-                            for d in can_add_filtered:
-                                key = f"add_{loc_id}_{d['id']}"
-                                checkbox_keys.append(key)
-                                
-                                subtitle = get_location_types_for_device(d, locations_map)
-                                
-                                cols = st.columns([0.5, 9.5])
-                                
-                                with cols[0]:
-                                    st.checkbox("", key=key)
-                                
-                                with cols[1]:
-                                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                                    card(
-                                        d["Name"],
-                                        location_types=subtitle,
-                                        selected=st.session_state.get(key, False),
-                                        incident_counts=(inc["active"], inc["total"])
-                                    )
-                        
-                        selected_ids = [
-                            key.split("_")[-1]
-                            for key in checkbox_keys
-                            if st.session_state.get(key, False)
-                        ]
-                        
-                        sel_count = len(selected_ids)
-                        
-                        if sel_count > 0:
-                            st.session_state[add_expander_key] = True
-                        
-                        if sel_count > 0:
-                            with st.sidebar:
-                                counter_badge(sel_count, len(can_add_filtered))
-                                
-                                if st.button(f"Añadir a {lname}", key=f"assign_btn_{loc_id}", use_container_width=True):
-                                    with st.spinner("Añadiendo dispositivos..."):
-                                        success_count = 0
-                                        for did in selected_ids:
-                                            resp = assign_device(did, loc_id)
-                                            if resp.status_code == 200:
-                                                success_count += 1
-                                        
-                                        for key in checkbox_keys:
-                                            if key in st.session_state:
-                                                del st.session_state[key]
-                                        
-                                        load_devices.clear()
-                                        preload_all_data.clear()
-                                        
-                                        st.session_state[expander_key] = True
-                                        st.session_state[add_expander_key] = False
-                                        st.rerun()
-                
-                if not is_expanded:
-                    st.session_state[expander_key] = False
-    
-    with st.expander(f"Envíos realizados (últimos 15 días) ({len(past_locs)})", expanded=True):
-        if len(past_locs) == 0:
-            st.info("No hay envíos realizados en los últimos 15 días.")
-        else:
-            for loc in past_locs:
-                lname = loc["name"]
-                loc_id = loc["id"]
-                device_count = loc["device_count"]
-                end_date_obj = loc["end_date_obj"]
-                
-                relative_date = format_relative_date(end_date_obj)
-                
-                if end_date_obj < date.today():
-                    status_text = f"Volvieron {relative_date}"
-                else:
-                    status_text = f"Vuelven {relative_date}"
-                
-                devices = all_devices
-                
-                expander_key = f"expander_past_loc_{loc_id}"
-                is_expanded = st.session_state.get(expander_key, False)
-                
-                with st.expander(f"✅ {lname} [{device_count}] ({status_text})", expanded=is_expanded):
-                    st.session_state[expander_key] = True
-                    
-                    assigned = [
-                        d for d in devices
-                        if loc_id in d["location_ids"]
-                    ]
-                    
-                    if end_date_obj < date.today():
-                        st.success("Estos dispositivos ya han sido devueltos")
-                        
-                        if len(assigned) > 0:
-                            st.markdown("---")
-                            st.caption("Dispositivos que se enviaron:")
-                            
-                            assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"past_assigned_{loc_id}")
-                            
-                            with st.container(border=False):
-                                for d in assigned_filtered:
-                                    subtitle = get_location_types_for_device(d, locations_map)
-                                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                                    card(
-                                        d["Name"],
-                                        location_types=subtitle,
-                                        incident_counts=(inc["active"], inc["total"])
-                                    )
+                    if has_pending:
+                        icon = "⏳"
+                        status_text = f"Terminó {relative_date} (Parcialmente recepcionado)"
                     else:
-                        st.warning("⏳ Pendientes de devolución")
-                        
-                        if len(assigned) == 0:
-                            st.info("Este envío no tiene dispositivos registrados.")
+                        icon = "✅"
+                        if checkin_date:
+                            checkin_fmt = fmt(checkin_date)
+                            status_text = f"Recepcionado el {checkin_fmt}"
                         else:
-                            st.subheader("Dispositivos asignados")
-                            
-                            assigned_filtered, _ = smart_segmented_filter(assigned, key_prefix=f"past_assigned_{loc_id}")
-                            
-                            with st.container(border=False):
-                                for d in assigned_filtered:
-                                    subtitle = get_location_types_for_device(d, locations_map)
-                                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                                    card(
-                                        d["Name"],
-                                        location_types=subtitle,
-                                        incident_counts=(inc["active"], inc["total"])
-                                    )
-                
-                if not is_expanded:
-                    st.session_state[expander_key] = False
-
-elif st.session_state.menu == "Check-In":
-    st.title("Check-In de dispositivos")
-    legend_button()
-    
-    today = date.today()
-    all_locs = preloaded_data['all_locations']
-    devices = all_devices
-    
-    finished = []
-    
-    for p in all_locs:
-        props = p["properties"]
-        
-        if not props.get("Type") or props["Type"]["select"]["name"] != "Client":
-            continue
-        
-        ed = None
-        if props.get("End Date") and props["End Date"].get("date"):
-            ed = props["End Date"]["date"]["start"]
-        
-        if not ed:
-            continue
-        
-        if iso_to_date(ed) >= today:
-            continue
-        
-        loc_id = p["id"]
-        assigned = [d for d in devices if loc_id in d["location_ids"]]
-        
-        if len(assigned) == 0:
-            continue
-        
-        finished.append({
-            "id": loc_id,
-            "name": props["Name"]["title"][0]["text"]["content"],
-            "end": ed
-        })
-    
-    if not finished:
-        st.info("No hay envíos finalizados con dispositivos.")
-        st.stop()
-    
-    options = ["Seleccionar..."] + [
-        f"{x['name']} (fin {fmt(x['end'])})" for x in finished
-    ]
-    
-    sel = st.selectbox("Selecciona envío terminado:", options)
-    
-    if sel != "Seleccionar...":
-        loc = finished[options.index(sel) - 1]
-        
-        st.write(f"Finalizó el **{fmt(loc['end'])}**")
-        
-        assigned = [
-            d for d in devices
-            if loc["id"] in d["location_ids"]
-        ]
-        
-        office = office_id()
-        
-        with st.expander(f"Gafas para recepcionar ({len(assigned)})", expanded=True):
-            
-            with st.container(border=False):
-                for d in assigned:
-                    cols = st.columns([8, 2])
+                            status_text = f"Terminó {relative_date}"
                     
-                    with cols[0]:
-                        subtitle = get_location_types_for_device(d, locations_map)
-                        inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                        card(
-                            d["Name"],
-                            location_types=subtitle,
-                            incident_counts=(inc["active"], inc["total"])
-                        )
-                    
-                    with cols[1]:
-                        if st.button("Check-In", key=f"checkin_{d['id']}", use_container_width=True):
-                            if not st.session_state.processing_action:
-                                st.session_state.processing_action = True
-                                with st.sidebar:
-                                    with st.spinner("Procesando Check-In..."):
-                                        payload = {
-                                            "parent": {"database_id": HISTORIC_ID},
-                                            "properties": {
-                                                "Name": {"title": [{"text": {"content": d['Name']}}]},
-                                                "Tags": {"select": {"name": d["Tags"]}} if d.get("Tags") else None,
-                                                "SN": {"rich_text": [{"text": {"content": d.get("SN", "")}}]},
-                                                "Location": {"relation": [{"id": loc["id"]}]},
-                                                "Start Date": {"date": {"start": d["Start"]}} if d.get("Start") else None,
-                                                "End Date": {"date": {"start": d["End"]}} if d.get("End") else None,
-                                                "Check In": {"date": {"start": date.today().isoformat()}}
-                                            }
-                                        }
-                                        
-                                        payload["properties"] = {
-                                            k: v for k, v in payload["properties"].items() if v is not None
-                                        }
-                                        
-                                        r = requests.post(
-                                            "https://api.notion.com/v1/pages",
-                                            headers=headers,
-                                            json=payload
+                    with st.expander(f"{icon} {lname} [{device_count}] ({status_text})", expanded=False):
+                        
+                        devices = all_devices
+                        
+                        assigned = [
+                            d for d in devices
+                            if loc_id in d["location_ids"]
+                        ]
+                        
+                        if has_pending:
+                            st.warning("⏳ Algunos dispositivos aún no han sido recepcionados")
+                            
+                            if len(assigned) > 0:
+                                st.caption("Dispositivos pendientes:")
+                                
+                                with st.container(border=False):
+                                    for d in assigned:
+                                        subtitle = get_location_types_for_device(d, locations_map)
+                                        inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                        card(
+                                            d["Name"],
+                                            location_types=subtitle,
+                                            incident_counts=(inc["active"], inc["total"])
                                         )
-                                        
-                                        if r.status_code != 200:
-                                            st.session_state.processing_action = False
-                                            show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
-                                        else:
-                                            resp = assign_device(d["id"], office)
-                                            
-                                            if resp.status_code == 200:
-                                                load_devices.clear()
-                                                q.clear()
-                                                preload_all_data.clear()
-                                                st.session_state.processing_action = False
-                                                st.rerun()
-                                            else:
-                                                st.session_state.processing_action = False
-                                                show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
+                        else:
+                            st.success("✅ Todos los dispositivos han sido recepcionados")
+                            
+                            if device_count > 0:
+                                st.caption(f"Se enviaron {device_count} dispositivo(s)")
 
+
+# ==================== TAB 4: INCIDENCIAS ====================
 
 elif st.session_state.menu == "Incidencias":
     st.title("Incidencias en dispositivos")
@@ -1625,10 +1786,9 @@ elif st.session_state.menu == "Incidencias":
     with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=True):
         
         devices_with_incidents = [
-        device_map[did] for did in incidents_by_device.keys() if did in device_map
-    ]
+            device_map[did] for did in incidents_by_device.keys() if did in device_map
+        ]
 
-        # 🔍 BUSCADOR DINÁMICO (PÉGALO AQUÍ)
         search_query = st.text_input(
             "Buscar dispositivo...",
             placeholder="Ej: Quest 3, Quest 2, Vision Pro...",
@@ -1636,13 +1796,12 @@ elif st.session_state.menu == "Incidencias":
         )
 
         if search_query:
-            q = search_query.lower().strip()
+            q_lower = search_query.lower().strip()
             devices_with_incidents = [
                 d for d in devices_with_incidents 
-                if q in d["Name"].lower()
+                if q_lower in d["Name"].lower()
             ]
 
-        # 👉 EL FILTRO SEGMENTADO VA DESPUÉS — NO LO MUEVAS
         devices_filtered, selected_group = smart_segmented_filter(
             devices_with_incidents, 
             key_prefix="incidents_filter",
@@ -1732,90 +1891,90 @@ elif st.session_state.menu == "Incidencias":
     if st.session_state.solve_inc:
         inc = st.session_state.solve_inc
 
-        with st.sidebar:
-            st.header("Resolver incidencia")
-            st.write(f"**{inc['Name']}**")
-            st.caption(f"Creada: {fmt_datetime(inc.get('Created'))}")
+        st.markdown("---")
+        st.header("Resolver incidencia")
+        st.write(f"**{inc['Name']}**")
+        st.caption(f"Creada: {fmt_datetime(inc.get('Created'))}")
 
-            if inc.get("Notes"):
-                st.caption(f"Notas: {inc['Notes']}")
+        if inc.get("Notes"):
+            st.caption(f"Notas: {inc['Notes']}")
 
-            col_date, col_time = st.columns(2)
+        col_date, col_time = st.columns(2)
 
-            with col_date:
-                resolved_date = st.date_input("Fecha de resolución", value=date.today())
+        with col_date:
+            resolved_date = st.date_input("Fecha de resolución", value=date.today())
 
-            with col_time:
-                resolved_time = st.time_input("Hora de resolución", value=datetime.now().time())
+        with col_time:
+            resolved_time = st.time_input("Hora de resolución", value=datetime.now().time())
 
-            rnotes = st.text_area("Notas de resolución")
+        rnotes = st.text_area("Notas de resolución")
 
-            col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-            with col1:
-                if st.button("Confirmar", use_container_width=True):
+        with col1:
+            if st.button("Confirmar", use_container_width=True):
 
-                    feedback = st.empty()
-                    with feedback:
-                        with st.spinner("Resolviendo incidencia..."):
+                feedback = st.empty()
+                with feedback:
+                    with st.spinner("Resolviendo incidencia..."):
 
-                            resolved_datetime = datetime.combine(resolved_date, resolved_time)
-                            resolved_iso = resolved_datetime.isoformat()
+                        resolved_datetime = datetime.combine(resolved_date, resolved_time)
+                        resolved_iso = resolved_datetime.isoformat()
 
-                            properties = {
-                                "Name": {"title": [{"text": {"content": inc["Name"]}}]},
-                                "Device": {"relation": [{"id": inc["Device"]}]},
-                                "Created Date": {"date": {"start": inc.get("Created")}},
-                                "Notes": {"rich_text": [{"text": {"content": inc.get("Notes", "")}}]},
-                                "Resolved Date": {"date": {"start": resolved_iso}},
+                        properties = {
+                            "Name": {"title": [{"text": {"content": inc["Name"]}}]},
+                            "Device": {"relation": [{"id": inc["Device"]}]},
+                            "Created Date": {"date": {"start": inc.get("Created")}},
+                            "Notes": {"rich_text": [{"text": {"content": inc.get("Notes", "")}}]},
+                            "Resolved Date": {"date": {"start": resolved_iso}},
+                        }
+
+                        if rnotes:
+                            properties["Resolution Notes"] = {
+                                "rich_text": [{"text": {"content": rnotes}}]
                             }
 
-                            if rnotes:
-                                properties["Resolution Notes"] = {
-                                    "rich_text": [{"text": {"content": rnotes}}]
-                                }
+                        r1 = requests.post(
+                            "https://api.notion.com/v1/pages",
+                            headers=headers,
+                            json={"parent": {"database_id": PAST_INC_ID}, "properties": properties}
+                        )
 
-                            r1 = requests.post(
-                                "https://api.notion.com/v1/pages",
+                        if r1.status_code == 200:
+                            r2 = requests.patch(
+                                f"https://api.notion.com/v1/pages/{inc['id']}",
                                 headers=headers,
-                                json={"parent": {"database_id": PAST_INC_ID}, "properties": properties}
+                                json={"archived": True}
                             )
 
-                            if r1.status_code == 200:
-                                r2 = requests.patch(
-                                    f"https://api.notion.com/v1/pages/{inc['id']}",
-                                    headers=headers,
-                                    json={"archived": True}
-                                )
+                            if r2.status_code == 200:
+                                st.session_state.solve_inc = None
+                                st.session_state.add_new_incident_expander = False
+                                st.session_state.force_incidents_tab = True
+                                
+                                load_active_incidents.clear()
+                                load_past_incidents.clear()
+                                load_incidence_map.clear()
+                                q.clear()
+                                preload_all_data.clear()
 
-                                if r2.status_code == 200:
-                                    st.session_state.solve_inc = None
-                                    st.session_state.add_new_incident_expander = False
-                                    st.session_state.force_incidents_tab = True
-                                    
-                                    load_active_incidents.clear()
-                                    load_past_incidents.clear()
-                                    load_incidence_map.clear()
-                                    q.clear()
-                                    preload_all_data.clear()
-
-                                    feedback.empty()
-                                    show_feedback("success", "Incidencia resuelta", duration=1.5)
-                                    time.sleep(1.5)
-                                    st.rerun()
-
-                                else:
-                                    feedback.empty()
-                                    show_feedback("error", f"Error al archivar incidencia: {r2.status_code}", duration=3)
+                                feedback.empty()
+                                show_feedback("success", "Incidencia resuelta", duration=1.5)
+                                time.sleep(1.5)
+                                st.rerun()
 
                             else:
                                 feedback.empty()
-                                show_feedback("error", f"Error al crear incidencia resuelta: {r1.status_code}", duration=3)
+                                show_feedback("error", f"Error al archivar incidencia: {r2.status_code}", duration=3)
 
-            with col2:
-                if st.button("Cancelar", use_container_width=True):
-                    st.session_state.solve_inc = None
-                    st.rerun()
+                        else:
+                            feedback.empty()
+                            show_feedback("error", f"Error al crear incidencia resuelta: {r1.status_code}", duration=3)
+
+        with col2:
+            if st.button("Cancelar", use_container_width=True):
+                st.session_state.solve_inc = None
+                st.rerun()
 
     add_new_expanded = st.session_state.get("add_new_incident_expander", False)
 
@@ -1853,67 +2012,66 @@ elif st.session_state.menu == "Incidencias":
             key.split("_")[1] for key in sel_keys if st.session_state.get(key, False)
         ]
 
-        with st.sidebar:
-            if selected_devices:
-                counter_badge(len(selected_devices), len(devices_filtered_new))
+        if selected_devices:
+            counter_badge(len(selected_devices), len(devices_filtered_new))
 
-                name = st.text_input("Título incidencia", key="new_inc_name")
-                notes = st.text_area("Notas", key="new_inc_notes")
+            name = st.text_input("Título incidencia", key="new_inc_name")
+            notes = st.text_area("Notas", key="new_inc_notes")
 
-                if st.button("Crear incidencia", use_container_width=True):
+            if st.button("Crear incidencia", use_container_width=True):
 
-                    if not name or name.strip() == "":
-                        show_feedback("error", "Debes poner un título", duration=2)
+                if not name or name.strip() == "":
+                    show_feedback("error", "Debes poner un título", duration=2)
 
-                    else:
-                        feedback = st.empty()
-                        with feedback:
-                            with st.spinner("Creando incidencia..."):
-                                now = datetime.now().isoformat()
-                                ok = True
+                else:
+                    feedback = st.empty()
+                    with feedback:
+                        with st.spinner("Creando incidencia..."):
+                            now = datetime.now().isoformat()
+                            ok = True
 
-                                for did in selected_devices:
-                                    payload = {
-                                        "parent": {"database_id": ACTIVE_INC_ID},
-                                        "properties": {
-                                            "Name": {"title": [{"text": {"content": name}}]},
-                                            "Device": {"relation": [{"id": did}]},
-                                            "Notes": {"rich_text": [{"text": {"content": notes}}]},
-                                            "Created Date": {"date": {"start": now}},
-                                        },
-                                    }
+                            for did in selected_devices:
+                                payload = {
+                                    "parent": {"database_id": ACTIVE_INC_ID},
+                                    "properties": {
+                                        "Name": {"title": [{"text": {"content": name}}]},
+                                        "Device": {"relation": [{"id": did}]},
+                                        "Notes": {"rich_text": [{"text": {"content": notes}}]},
+                                        "Created Date": {"date": {"start": now}},
+                                    },
+                                }
 
-                                    r = requests.post(
-                                        "https://api.notion.com/v1/pages",
-                                        headers=headers,
-                                        json=payload,
-                                    )
+                                r = requests.post(
+                                    "https://api.notion.com/v1/pages",
+                                    headers=headers,
+                                    json=payload,
+                                )
 
-                                    if r.status_code != 200:
-                                        ok = False
-                                        feedback.empty()
-                                        show_feedback("error", f"Error: {r.status_code}", duration=3)
-                                        break
-
-                                if ok:
-                                    for key in sel_keys:
-                                        if key in st.session_state:
-                                            del st.session_state[key]
-
-                                    if "new_inc_name" in st.session_state:
-                                        del st.session_state["new_inc_name"]
-                                    if "new_inc_notes" in st.session_state:
-                                        del st.session_state["new_inc_notes"]
-
-                                    st.session_state.add_new_incident_expander = False
-                                    st.session_state.force_incidents_tab = True
-                                    
-                                    load_active_incidents.clear()
-                                    load_incidence_map.clear()
-                                    q.clear()
-                                    preload_all_data.clear()
-
+                                if r.status_code != 200:
+                                    ok = False
                                     feedback.empty()
-                                    show_feedback("success", "Incidencia creada", duration=1.5)
-                                    time.sleep(1.5)
-                                    st.rerun()
+                                    show_feedback("error", f"Error: {r.status_code}", duration=3)
+                                    break
+
+                            if ok:
+                                for key in sel_keys:
+                                    if key in st.session_state:
+                                        del st.session_state[key]
+
+                                if "new_inc_name" in st.session_state:
+                                    del st.session_state["new_inc_name"]
+                                if "new_inc_notes" in st.session_state:
+                                    del st.session_state["new_inc_notes"]
+
+                                st.session_state.add_new_incident_expander = False
+                                st.session_state.force_incidents_tab = True
+                                
+                                load_active_incidents.clear()
+                                load_incidence_map.clear()
+                                q.clear()
+                                preload_all_data.clear()
+
+                                feedback.empty()
+                                show_feedback("success", "Incidencia creada", duration=1.5)
+                                time.sleep(1.5)
+                                st.rerun()
