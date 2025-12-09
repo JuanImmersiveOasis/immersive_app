@@ -11,10 +11,6 @@ st.set_page_config(page_title="Logistica", page_icon=None, layout="wide")
 
 st.markdown("""
     <style>
-<<<<<<< HEAD
-    /* Botones principales */
-=======
->>>>>>> Mejoras
     .stButton > button {
         background-color: #00859b;
         color: white;
@@ -36,25 +32,12 @@ st.markdown("""
         transform: translateY(0px);
     }
     
-<<<<<<< HEAD
-    /* Botones de formulario */
-    .stFormSubmitButton > button {
-        background-color: #919D9D;
-=======
     .stFormSubmitButton > button {
         background-color: #00859b;
->>>>>>> Mejoras
         color: white;
         border: none;
         border-radius: 6px;
         font-weight: 600;
-<<<<<<< HEAD
-    }
-    
-    .stFormSubmitButton > button:hover {
-<<<<<<< HEAD
-        background-color: #919D9D;
-=======
         transition: all 0.2s ease;
     }
     
@@ -67,10 +50,6 @@ st.markdown("""
     .stFormSubmitButton > button:active {
         background-color: #005565;
         transform: translateY(0px);
->>>>>>> Mejoras
-=======
-        background-color: #818282;
->>>>>>> d072c3c8f8b6c68c47ac77b98df3fc03c8948905
     }
     </style>
     """, unsafe_allow_html=True)
@@ -1771,79 +1750,6 @@ elif st.session_state.menu == "Almacén":
                 end_date_obj = loc["end_date_obj"]
                 total_days = loc["total_days"]
                 
-<<<<<<< HEAD
-                if not add_expanded:
-                    st.session_state[add_expander_key] = False
-            
-            if not is_expanded:
-                st.session_state[expander_key] = False
-
-elif st.session_state.menu == "Check-In":
-    st.title("Check-In de dispositivos")
-    legend_button()
-    
-    today = date.today()
-    all_locs = preloaded_data['all_locations']
-    devices = all_devices
-    
-    finished = []
-    
-    for p in all_locs:
-        props = p["properties"]
-        
-        if not props.get("Type") or props["Type"]["select"]["name"] != "Client":
-            continue
-        
-        ed = None
-        if props.get("End Date") and props["End Date"].get("date"):
-            ed = props["End Date"]["date"]["start"]
-        
-        if not ed:
-            continue
-        
-        if iso_to_date(ed) >= today:
-            continue
-        
-        loc_id = p["id"]
-        assigned = [d for d in devices if loc_id in d["location_ids"]]
-        
-        if len(assigned) == 0:
-            continue
-        
-        finished.append({
-            "id": loc_id,
-            "name": props["Name"]["title"][0]["text"]["content"],
-            "end": ed
-        })
-    
-    if not finished:
-        st.info("No hay envíos finalizados con dispositivos.")
-        st.stop()
-    
-    options = ["Seleccionar..."] + [
-        f"{x['name']} (fin {fmt(x['end'])})" for x in finished
-    ]
-    
-    sel = st.selectbox("Selecciona envío terminado:", options)
-    
-    if sel != "Seleccionar...":
-        loc = finished[options.index(sel) - 1]
-        
-        st.write(f"Finalizó el **{fmt(loc['end'])}**")
-        
-        assigned = [
-            d for d in devices
-            if loc["id"] in d["location_ids"]
-        ]
-        
-        office = office_id()
-        
-        with st.expander(f"Gafas para recepcionar ({len(assigned)})", expanded=True):
-            
-            with st.container(border=False):
-                for d in assigned:
-                    cols = st.columns([8, 2])
-=======
                 if days_until_end < 30:
                     status_circle = "🟡"
                 else:
@@ -1852,7 +1758,6 @@ elif st.session_state.menu == "Check-In":
                 days_text = f"Quedan {days_until_end} días" if days_until_end > 0 else "Termina hoy"
                 
                 with st.expander(f"{status_circle} 📦 {lname} 🥽 {device_count} 📅 {days_text}", expanded=False):
->>>>>>> Mejoras
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
