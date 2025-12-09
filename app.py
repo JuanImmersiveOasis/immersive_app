@@ -868,7 +868,7 @@ if st.session_state.menu == "Disponibles para Alquilar":
         
         avail_filtered, _ = smart_segmented_filter(avail, key_prefix="tab1")
         
-        with st.container(height=400, border=True):
+        with st.container(height=300, border=True):
             for d in avail_filtered:
                 key = f"a_{d['id']}"
                 subtitle = get_location_types_for_device(d, locations_map)
@@ -1026,7 +1026,7 @@ elif st.session_state.menu == "Gafas en casa":
         
         office_filtered, _ = smart_segmented_filter(office_devices, key_prefix="office")
         
-        with st.container(height=400, border=True):
+        with st.container(height=300, border=True):
             for d in office_filtered:
                 key = f"o_{d['id']}"
                 subtitle = get_location_types_for_device(d, locations_map)
@@ -1190,7 +1190,7 @@ elif st.session_state.menu == "Próximos Envíos":
                     
                     checkbox_keys = []
                     
-                    with st.container(height=400, border=True):
+                    with st.container(height=300, border=True):
                         for d in can_add_filtered:
                             key = f"add_{loc_id}_{d['id']}"
                             checkbox_keys.append(key)
@@ -1462,7 +1462,7 @@ elif st.session_state.menu == "Incidencias":
                         "inc": inc
                     })
             
-            with st.container(height=500, border=True):
+            with st.container(height=300, border=True):
                 for item in all_incidents_list:
                     inc = item["inc"]
                     dev_name = item["dev_name"]
