@@ -599,6 +599,110 @@ def confirm_reassign_pending(client_name, devices, start_date, end_date, old_loc
                 else:
                     show_feedback('error', f"Error al crear nuevo proyecto: {response.status_code}", duration=3)
 
+@st.dialog("⚠️ Renovar alquiler")
+def confirm_renew_rental(client_name, devices, start_date, end_date, old_loc_id, old_loc_name, device_ids):
+    st.write(f"**Vas a renovar el alquiler:**")
+    st.write(f"• Alquiler actual: **{old_loc_name}**")
+    st.write(f"• Nuevo alquiler: **{client_name}**")
+    st.write(f"• Dispositivos: **{len(devices)}**")
+    st.write(f"• Desde: **{start_date.strftime('%d/%m/%Y')}**")
+    st.write(f"• Hasta: **{end_date.strftime('%d/%m/%Y')}**")
+    
+    total_days = (end_date - start_date).days
+    st.write(f"• Duración: **{total_days} días**")
+    
+    conflicts = []
+    for dev in devices:
+        if dev.get("Start") and dev.get("End"):
+            dev_start = iso_to_date(dev["Start"])
+            dev_end = iso_to_date(dev["End"])
+            
+            if dev_start and dev_end:
+                if not (start_date > dev_end or end_date < dev_start):
+                    conflicts.append(dev["Name"])
+    
+    if conflicts:
+        st.error(f"⚠️ **Conflicto detectado:** Los siguientes dispositivos ya están asignados a otros proyectos en esas fechas:")
+        for dev_name in conflicts:
+            st.write(f"• {dev_name}")
+        st.warning("Si continúas, estos dispositivos tendrán solapamiento de fechas.")
+    
+    st.info("Se hará check-in automático de todos los dispositivos del alquiler actual y se crearán nuevas asignaciones para la renovación.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancelar", use_container_width=True):
+            st.rerun()
+    with col2:
+        if st.button("Confirmar renovación", use_container_width=True, type="primary"):
+            with st.spinner("Procesando renovación..."):
+                
+                checkin_success = 0
+                for dev in devices:
+                    payload = {
+                        "parent": {"database_id": HISTORIC_ID},
+                        "properties": {
+                            "Name": {"title": [{"text": {"content": dev['Name']}}]},
+                            "Tags": {"select": {"name": dev["Tags"]}} if dev.get("Tags") else None,
+                            "SN": {"rich_text": [{"text": {"content": dev.get("SN", "")}}]},
+                            "Location": {"relation": [{"id": old_loc_id}]},
+                            "Start Date": {"date": {"start": dev["Start"]}} if dev.get("Start") else None,
+                            "End Date": {"date": {"start": dev["End"]}} if dev.get("End") else None,
+                            "Check In": {"date": {"start": date.today().isoformat()}}
+                        }
+                    }
+                    
+                    payload["properties"] = {
+                        k: v for k, v in payload["properties"].items() if v is not None
+                    }
+                    
+                    r = requests.post(
+                        "https://api.notion.com/v1/pages",
+                        headers=headers,
+                        json=payload
+                    )
+                    
+                    if r.status_code == 200:
+                        checkin_success += 1
+                
+                response = requests.post(
+                    "https://api.notion.com/v1/pages", 
+                    headers=headers,
+                    json={
+                        "parent": {"database_id": LOCATIONS_ID},
+                        "properties": {
+                            "Name": {"title": [{"text": {"content": client_name}}]},
+                            "Type": {"select": {"name": "Client"}},
+                            "Start Date": {"date": {"start": start_date.isoformat()}},
+                            "End Date": {"date": {"start": end_date.isoformat()}}
+                        }
+                    }
+                )
+                
+                if response.status_code == 200:
+                    new_loc_id = response.json()["id"]
+                    
+                    assign_success = 0
+                    for did in device_ids:
+                        resp = assign_device(did, new_loc_id)
+                        if resp.status_code == 200:
+                            assign_success += 1
+                    
+                    load_devices.clear()
+                    load_active_client_locations.clear()
+                    load_future_client_locations.clear()
+                    load_pending_reception_locations.clear()
+                    load_historic_client_locations.clear()
+                    load_locations_map.clear()
+                    q.clear()
+                    preload_all_data.clear()
+                    
+                    show_feedback('success', f"Renovación completada: Check-in {checkin_success}/{len(devices)} | Asignados {assign_success}/{len(devices)}", duration=2)
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    show_feedback('error', f"Error al crear nuevo alquiler: {response.status_code}", duration=3)
+
 
 def legend_button():
     st.markdown(
@@ -1453,7 +1557,9 @@ if st.session_state.menu == "Disponibles para Alquilar":
     with c3:
         if 'tab1_start_date' in st.session_state and 'tab1_end_date' in st.session_state:
             days_diff = (st.session_state.tab1_end_date - st.session_state.tab1_start_date).days
-            st.metric("Días totales", days_diff)
+        else:
+            days_diff = 0
+        st.metric("Días totales", days_diff)
     
     if st.button("Comprobar disponibilidad"):
         st.session_state.tab1_show = True
@@ -1499,8 +1605,8 @@ if st.session_state.menu == "Disponibles para Alquilar":
             counter_badge(sel_count, len(avail_filtered))
             
             with st.form("form_assign_client"):
-                client = st.text_input("Nombre Cliente")
-                submit = st.form_submit_button("Asignar Cliente", use_container_width=True)
+                client = st.text_input("Nombre de Proyecto")
+                submit = st.form_submit_button("Asignar a proyecto", use_container_width=True)
                 
                 if submit:
                     if not client or client.strip() == "":
@@ -1529,6 +1635,7 @@ elif st.session_state.menu == "Gafas en casa":
         st.session_state.expander_states[expander_personal_key] = True
     
     with st.expander("Personal con dispositivos en casa", expanded=st.session_state.expander_states[expander_personal_key]):
+        st.session_state.expander_states[expander_personal_key] = True
         
         inhouse_filtered, _ = smart_segmented_filter(inhouse_devices, key_prefix="inhouse")
         
@@ -1553,6 +1660,7 @@ elif st.session_state.menu == "Gafas en casa":
                     st.session_state.expander_states[person_expander_key] = False
                 
                 with st.expander(f"{pname} ({len(devs)})", expanded=st.session_state.expander_states[person_expander_key]):
+                    st.session_state.expander_states[person_expander_key] = True
                     
                     for d in devs:
                         cols = st.columns([8, 2])
@@ -1579,6 +1687,7 @@ elif st.session_state.menu == "Gafas en casa":
         st.session_state.expander_states[expander_office_key] = False
     
     with st.expander("Otras gafas disponibles en oficina", expanded=st.session_state.expander_states[expander_office_key]):
+        st.session_state.expander_states[expander_office_key] = True
         
         office_filtered, _ = smart_segmented_filter(office_devices, key_prefix="office")
         
@@ -1615,7 +1724,6 @@ elif st.session_state.menu == "Gafas en casa":
             
             if st.button("Asignar seleccionadas", use_container_width=True):
                 confirm_assign_to_person(dest, sel_count, dest_id, st.session_state.sel2)
-
 
 elif st.session_state.menu == "Almacén":
     st.title("📦 Almacén")
@@ -1656,6 +1764,7 @@ elif st.session_state.menu == "Almacén":
                     st.session_state.expander_states[shipment_expander_key] = False
                 
                 with st.expander(f"{status_icon} {lname} 🥽 {device_count} 📅 Sale {relative_start}", expanded=st.session_state.expander_states[shipment_expander_key]):
+                    st.session_state.expander_states[shipment_expander_key] = True
                     
                     devices = all_devices
                     
@@ -1695,11 +1804,12 @@ elif st.session_state.menu == "Almacén":
                     total_days_rental = (le - ls).days if ls and le else 0
                     
                     with st.expander(f"📅 Fechas [{fmt(loc['start'])} → {fmt(loc['end'])}] • {total_days_rental} días", expanded=st.session_state.expander_states[expander_dates_key]):
+                        st.session_state.expander_states[expander_dates_key] = True
                         
                         with st.form(key=f"edit_dates_{loc_id}"):
                             st.subheader("Editar fechas del envío")
                             
-                            col_start, col_end, col_days = st.columns(3)
+                            col_start, col_end = st.columns(2)
                             
                             with col_start:
                                 current_start = iso_to_date(loc["start"])
@@ -1716,11 +1826,6 @@ elif st.session_state.menu == "Almacén":
                                     value=current_end if current_end else date.today(),
                                     key=f"new_end_{loc_id}"
                                 )
-                            
-                            with col_days:
-                                if f"new_start_{loc_id}" in st.session_state and f"new_end_{loc_id}" in st.session_state:
-                                    calc_days = (st.session_state[f"new_end_{loc_id}"] - st.session_state[f"new_start_{loc_id}"]).days
-                                    st.metric("Días totales", calc_days)
                             
                             submit_dates = st.form_submit_button("Actualizar fechas", use_container_width=True)
                             
@@ -1760,6 +1865,7 @@ elif st.session_state.menu == "Almacén":
                         st.session_state.expander_states[expander_devices_key] = False
                     
                     with st.expander(f"🥽 Dispositivos [{len(assigned)} asignados]", expanded=st.session_state.expander_states[expander_devices_key]):
+                        st.session_state.expander_states[expander_devices_key] = True
                         
                         if len(assigned) == 0:
                             st.warning("Este envío no tiene dispositivos asignados")
@@ -1791,6 +1897,7 @@ elif st.session_state.menu == "Almacén":
                             st.session_state.expander_states[expander_add_key] = False
                         
                         with st.expander(f"➕ Añadir más dispositivos [{len(can_add)} disponibles]", expanded=st.session_state.expander_states[expander_add_key]):
+                            st.session_state.expander_states[expander_add_key] = True
                             
                             can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
                             
@@ -1861,6 +1968,8 @@ elif st.session_state.menu == "Almacén":
                 device_count = loc["device_count"]
                 days_until_end = loc["days_until_end"]
                 total_days = loc["total_days"]
+                start_date_obj = loc["start_date_obj"]
+                end_date_obj = loc["end_date_obj"]
                 
                 if days_until_end < 30:
                     status_circle = "🟡"
@@ -1874,6 +1983,7 @@ elif st.session_state.menu == "Almacén":
                     st.session_state.expander_states[active_expander_key] = False
                 
                 with st.expander(f"{status_circle} 📦 {lname} 🥽 {device_count} 📅 {days_text}", expanded=st.session_state.expander_states[active_expander_key]):
+                    st.session_state.expander_states[active_expander_key] = True
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -1885,8 +1995,77 @@ elif st.session_state.menu == "Almacén":
                     
                     st.markdown("")
                     
-                    if st.button("Terminar alquiler hoy", key=f"end_today_{loc_id}", use_container_width=True):
-                        confirm_end_shipment(lname, device_count, loc_id)
+                    col_end, col_renew = st.columns(2)
+                    
+                    with col_end:
+                        if st.button("Terminar alquiler hoy", key=f"end_today_{loc_id}", use_container_width=True):
+                            confirm_end_shipment(lname, device_count, loc_id)
+                    
+                    with col_renew:
+                        if st.button("🔄 Renovar alquiler", key=f"toggle_renew_{loc_id}", use_container_width=True):
+                            renew_key = f"expander_renew_{loc_id}"
+                            if renew_key not in st.session_state.expander_states:
+                                st.session_state.expander_states[renew_key] = False
+                            st.session_state.expander_states[renew_key] = not st.session_state.expander_states[renew_key]
+                            st.rerun()
+                    
+                    renew_expander_key = f"expander_renew_{loc_id}"
+                    if renew_expander_key not in st.session_state.expander_states:
+                        st.session_state.expander_states[renew_expander_key] = False
+                    
+                    if st.session_state.expander_states[renew_expander_key]:
+                        with st.container(border=True):
+                            st.subheader("Renovar alquiler")
+                            st.caption(f"Se hará check-in de todos los dispositivos y se creará un nuevo alquiler consecutivo")
+                            
+                            assigned = [
+                                d for d in devices
+                                if loc_id in d["location_ids"]
+                            ]
+                            
+                            new_start_date = end_date_obj + timedelta(days=1)
+                            new_end_date = new_start_date + timedelta(days=total_days)
+                            year_suffix = new_start_date.year
+                            default_name = f"{lname} {year_suffix}"
+                            
+                            renew_client_name = st.text_input(
+                                "Nombre del nuevo alquiler",
+                                value=default_name,
+                                key=f"renew_name_{loc_id}"
+                            )
+                            
+                            col_start, col_end = st.columns(2)
+                            
+                            with col_start:
+                                renew_start = st.date_input(
+                                    "Fecha salida",
+                                    value=new_start_date,
+                                    key=f"renew_start_{loc_id}"
+                                )
+                            
+                            with col_end:
+                                renew_end = st.date_input(
+                                    "Fecha regreso",
+                                    value=new_end_date,
+                                    key=f"renew_end_{loc_id}"
+                                )
+                            
+                            col_confirm, col_cancel = st.columns(2)
+                            
+                            with col_confirm:
+                                if st.button("Confirmar renovación", key=f"confirm_renew_{loc_id}", use_container_width=True, type="primary"):
+                                    if not renew_client_name or renew_client_name.strip() == "":
+                                        show_feedback('error', "Debes escribir el nombre del alquiler", duration=2)
+                                    elif renew_start > renew_end:
+                                        show_feedback('error', "La fecha de salida no puede ser posterior a la de regreso", duration=3)
+                                    else:
+                                        device_ids = [d["id"] for d in assigned]
+                                        confirm_renew_rental(renew_client_name, assigned, renew_start, renew_end, loc_id, lname, device_ids)
+                            
+                            with col_cancel:
+                                if st.button("Cancelar", key=f"cancel_renew_{loc_id}", use_container_width=True):
+                                    st.session_state.expander_states[renew_expander_key] = False
+                                    st.rerun()
                     
                     st.markdown("---")
                     
@@ -1931,6 +2110,7 @@ elif st.session_state.menu == "Almacén":
                     st.session_state.expander_states[active_indef_expander_key] = False
                 
                 with st.expander(f"{status_circle} 📦 {lname} 🥽 {device_count} 📅 {days_text}", expanded=st.session_state.expander_states[active_indef_expander_key]):
+                    st.session_state.expander_states[active_indef_expander_key] = True
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -1971,136 +2151,6 @@ elif st.session_state.menu == "Almacén":
                                 with cols[1]:
                                     if st.button("Devolver", key=f"return_{loc_id}_{d['id']}", use_container_width=True):
                                         confirm_return_device(d["Name"], lname, d["id"])
-    
-    
-    with tab3:
-            
-            expander_pending_key = "expander_pending_reception"
-            if expander_pending_key not in st.session_state.expander_states:
-                st.session_state.expander_states[expander_pending_key] = True
-            
-            with st.expander(f"📬 Pendientes de recepcionar ({len(pending_locs)})", expanded=st.session_state.expander_states[expander_pending_key]):
-                if len(pending_locs) == 0:
-                    st.info("No hay envíos pendientes de recepcionar.")
-                else:
-                    for loc in pending_locs:
-                        lname = loc["name"]
-                        loc_id = loc["id"]
-                        device_count = loc["device_count"]
-                        end_date_obj = loc["end_date_obj"]
-                        
-                        relative_date = format_relative_date(end_date_obj)
-                        
-                        days_late = (date.today() - end_date_obj).days
-                        
-                        if days_late > 2:
-                            status_icon = "🔴"
-                        else:
-                            status_icon = "⚠️"
-                        
-                        pending_loc_expander_key = f"expander_pending_loc_{loc_id}"
-                        if pending_loc_expander_key not in st.session_state.expander_states:
-                            st.session_state.expander_states[pending_loc_expander_key] = False
-                        
-                        with st.expander(f"{status_icon} {lname} 🥽 {device_count} 📅 Terminó {relative_date}", expanded=st.session_state.expander_states[pending_loc_expander_key]):
-                            
-                            devices = all_devices
-                            
-                            assigned = [
-                                d for d in devices
-                                if loc_id in d["location_ids"]
-                            ]
-                            
-                            st.caption(f"Dispositivos pendientes de recepcionar:")
-                            
-                            with st.container(border=False):
-                                for d in assigned:
-                                    cols = st.columns([8, 2])
-                                    
-                                    with cols[0]:
-                                        subtitle = get_location_types_for_device(d, locations_map)
-                                        inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
-                                        card(
-                                            d["Name"],
-                                            location_types=subtitle,
-                                            incident_counts=(inc["active"], inc["total"])
-                                        )
-                                    
-                                    with cols[1]:
-                                        if st.button("Check-In", key=f"checkin_{d['id']}", use_container_width=True):
-                                            confirm_checkin(d["Name"], lname, d["id"], loc_id, d)
-                            
-                            st.markdown("---")
-                            
-                            reassign_expander_key = f"expander_reassign_{loc_id}"
-                            if reassign_expander_key not in st.session_state.expander_states:
-                                st.session_state.expander_states[reassign_expander_key] = False
-                            
-                            if st.button("📦 Reasignar a nuevo proyecto", key=f"toggle_reassign_{loc_id}", use_container_width=True):
-                                st.session_state.expander_states[reassign_expander_key] = not st.session_state.expander_states[reassign_expander_key]
-                                st.rerun()
-                            
-                            if st.session_state.expander_states[reassign_expander_key]:
-                                with st.container(border=True):
-                                    st.subheader("Reasignar dispositivos pendientes")
-                                    st.caption(f"Se hará check-in automático de {len(assigned)} dispositivos y se reasignarán al nuevo proyecto")
-                                    
-                                    with st.form(key=f"reassign_form_{loc_id}"):
-                                        new_client_name = st.text_input("Nombre del nuevo cliente/proyecto")
-                                        
-                                        col_start, col_end, col_days = st.columns(3)
-                                        
-                                        with col_start:
-                                            new_start = st.date_input(
-                                                "Fecha salida",
-                                                value=date.today(),
-                                                key=f"reassign_start_{loc_id}"
-                                            )
-                                        
-                                        with col_end:
-                                            new_end = st.date_input(
-                                                "Fecha regreso",
-                                                value=date.today() + timedelta(days=7),
-                                                key=f"reassign_end_{loc_id}"
-                                            )
-                                        
-                                        with col_days:
-                                            if f"reassign_start_{loc_id}" in st.session_state and f"reassign_end_{loc_id}" in st.session_state:
-                                                calc_days = (st.session_state[f"reassign_end_{loc_id}"] - st.session_state[f"reassign_start_{loc_id}"]).days
-                                                st.metric("Días totales", calc_days)
-                                        
-                                        submit_reassign = st.form_submit_button("Confirmar reasignación", use_container_width=True)
-                                        
-                                        if submit_reassign:
-                                            if not new_client_name or new_client_name.strip() == "":
-                                                show_feedback('error', "Debes escribir el nombre del cliente", duration=2)
-                                            elif new_start > new_end:
-                                                show_feedback('error', "La fecha de salida no puede ser posterior a la de regreso", duration=3)
-                                            else:
-                                                device_ids = [d["id"] for d in assigned]
-                                                confirm_reassign_pending(new_client_name, assigned, new_start, new_end, loc_id, lname, device_ids)
-            
-            expander_historic_key = "expander_historic"
-            if expander_historic_key not in st.session_state.expander_states:
-                st.session_state.expander_states[expander_historic_key] = False
-            
-            with st.expander(f"📚 Histórico (últimos 30 días) ({len(historic_locs)})", expanded=st.session_state.expander_states[expander_historic_key]):
-                if len(historic_locs) == 0:
-                    st.info("No hay envíos en el histórico de los últimos 30 días.")
-                else:
-                    for loc in historic_locs:
-                        lname = loc["name"]
-                        device_count = loc["device_count"]
-                        checkin_date = loc.get("checkin_date")
-                        
-                        if checkin_date:
-                            checkin_fmt = fmt(checkin_date)
-                            status_text = f"Recepcionado el {checkin_fmt}"
-                        else:
-                            status_text = "Completado"
-                        
-                        st.markdown(f"⚫ **{lname}** 🥽 {device_count} 📅 {status_text}")
-
 
 elif st.session_state.menu == "Incidencias":
     st.title("Incidencias en dispositivos")
@@ -2135,6 +2185,7 @@ elif st.session_state.menu == "Incidencias":
         st.session_state.expander_states[expander_incidents_key] = True
     
     with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=st.session_state.expander_states[expander_incidents_key]):
+        st.session_state.expander_states[expander_incidents_key] = True
         
         devices_with_incidents = [
             device_map[did] for did in incidents_by_device.keys() if did in device_map
@@ -2263,7 +2314,7 @@ elif st.session_state.menu == "Incidencias":
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("Confirmar", use_container_width=True):
+            if st.button("Confirmar", use_container_width=True, type="primary"):
 
                 feedback = st.empty()
                 with feedback:
@@ -2332,6 +2383,7 @@ elif st.session_state.menu == "Incidencias":
         st.session_state.expander_states[add_new_expanded_key] = False
 
     with st.expander("Añadir nueva incidencia", expanded=st.session_state.expander_states[add_new_expanded_key]):
+        st.session_state.expander_states[add_new_expanded_key] = True
 
         devices_with_location = [
             d for d in devices 
@@ -2428,3 +2480,4 @@ elif st.session_state.menu == "Incidencias":
                                 show_feedback("success", "Incidencia creada", duration=1.5)
                                 time.sleep(1.5)
                                 st.rerun()
+    
