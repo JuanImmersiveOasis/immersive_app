@@ -230,6 +230,39 @@ def confirm_assign_client(client_name, device_count, start_date, end_date, selec
     total_days = (end_date - start_date).days
     st.write(f"• Duración: **{total_days} días**")
     
+    st.markdown("---")
+    st.write("📦 **Dispositivos a asignar:**")
+    
+    devices = load_devices()
+    incidents = load_active_incidents()
+    incident_map_local = {}
+    for inc in incidents:
+        did = inc.get("Device")
+        if did:
+            if did not in incident_map_local:
+                incident_map_local[did] = []
+            incident_map_local[did].append(inc)
+    
+    devices_with_issues = 0
+    
+    for dev_id in selected_devices:
+        dev = next((d for d in devices if d["id"] == dev_id), None)
+        if not dev:
+            continue
+        
+        dev_incidents = incident_map_local.get(dev_id, [])
+        
+        if dev_incidents:
+            devices_with_issues += 1
+            for inc in dev_incidents:
+                st.markdown(f"⚠️ **{dev['Name']}** - Incidencia activa: *\"{inc['Name']}\"*")
+        else:
+            st.markdown(f"✅ {dev['Name']}")
+    
+    if devices_with_issues > 0:
+        st.warning(f"⚠️ **ADVERTENCIA:** {devices_with_issues} dispositivo(s) tienen incidencias activas. Se recomienda resolver las incidencias antes de asignar.")
+    
+    st.markdown("---")
     st.info("Se creará una nueva ubicación y se asignarán los dispositivos seleccionados.")
     
     col1, col2 = st.columns(2)
@@ -396,6 +429,40 @@ def confirm_add_devices(location_name, device_count, location_id, selected_devic
     st.write(f"• Al envío: **{location_name}**")
     st.write(f"• Cantidad: **{device_count}**")
     
+    st.markdown("---")
+    st.write("📦 **Dispositivos a añadir:**")
+    
+    devices = load_devices()
+    incidents = load_active_incidents()
+    incident_map_local = {}
+    for inc in incidents:
+        did = inc.get("Device")
+        if did:
+            if did not in incident_map_local:
+                incident_map_local[did] = []
+            incident_map_local[did].append(inc)
+    
+    devices_with_issues = 0
+    
+    for dev_id in selected_devices:
+        dev = next((d for d in devices if d["id"] == dev_id), None)
+        if not dev:
+            continue
+        
+        dev_incidents = incident_map_local.get(dev_id, [])
+        
+        if dev_incidents:
+            devices_with_issues += 1
+            for inc in dev_incidents:
+                st.markdown(f"⚠️ **{dev['Name']}** - Incidencia activa: *\"{inc['Name']}\"*")
+        else:
+            st.markdown(f"✅ {dev['Name']}")
+    
+    if devices_with_issues > 0:
+        st.warning(f"⚠️ **ADVERTENCIA:** {devices_with_issues} dispositivo(s) tienen incidencias activas. Se recomienda resolver las incidencias antes de añadir.")
+    
+    st.markdown("---")
+    
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Cancelar", use_container_width=True):
@@ -476,6 +543,40 @@ def confirm_assign_to_person(person_name, device_count, person_id, selected_devi
     st.write(f"• A: **{person_name}**")
     st.write(f"• Cantidad: **{device_count}**")
     
+    st.markdown("---")
+    st.write("📦 **Dispositivos a asignar:**")
+    
+    devices = load_devices()
+    incidents = load_active_incidents()
+    incident_map_local = {}
+    for inc in incidents:
+        did = inc.get("Device")
+        if did:
+            if did not in incident_map_local:
+                incident_map_local[did] = []
+            incident_map_local[did].append(inc)
+    
+    devices_with_issues = 0
+    
+    for dev_id in selected_devices:
+        dev = next((d for d in devices if d["id"] == dev_id), None)
+        if not dev:
+            continue
+        
+        dev_incidents = incident_map_local.get(dev_id, [])
+        
+        if dev_incidents:
+            devices_with_issues += 1
+            for inc in dev_incidents:
+                st.markdown(f"⚠️ **{dev['Name']}** - Incidencia activa: *\"{inc['Name']}\"*")
+        else:
+            st.markdown(f"✅ {dev['Name']}")
+    
+    if devices_with_issues > 0:
+        st.warning(f"⚠️ **ADVERTENCIA:** {devices_with_issues} dispositivo(s) tienen incidencias activas. Se recomienda resolver las incidencias antes de asignar.")
+    
+    st.markdown("---")
+    
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Cancelar", use_container_width=True):
@@ -507,6 +608,35 @@ def confirm_reassign_pending(client_name, devices, start_date, end_date, old_loc
     
     total_days = (end_date - start_date).days
     st.write(f"• Duración: **{total_days} días**")
+    
+    st.markdown("---")
+    st.write("📦 **Dispositivos a reasignar:**")
+    
+    incidents = load_active_incidents()
+    incident_map_local = {}
+    for inc in incidents:
+        did = inc.get("Device")
+        if did:
+            if did not in incident_map_local:
+                incident_map_local[did] = []
+            incident_map_local[did].append(inc)
+    
+    devices_with_issues = 0
+    
+    for dev in devices:
+        dev_incidents = incident_map_local.get(dev["id"], [])
+        
+        if dev_incidents:
+            devices_with_issues += 1
+            for inc in dev_incidents:
+                st.markdown(f"⚠️ **{dev['Name']}** - Incidencia activa: *\"{inc['Name']}\"*")
+        else:
+            st.markdown(f"✅ {dev['Name']}")
+    
+    if devices_with_issues > 0:
+        st.warning(f"⚠️ **ADVERTENCIA:** {devices_with_issues} dispositivo(s) tienen incidencias activas. Se recomienda resolver las incidencias antes de reasignar.")
+    
+    st.markdown("---")
     
     conflicts = []
     for dev in devices:
@@ -610,6 +740,35 @@ def confirm_renew_rental(client_name, devices, start_date, end_date, old_loc_id,
     
     total_days = (end_date - start_date).days
     st.write(f"• Duración: **{total_days} días**")
+    
+    st.markdown("---")
+    st.write("📦 **Dispositivos a renovar:**")
+    
+    incidents = load_active_incidents()
+    incident_map_local = {}
+    for inc in incidents:
+        did = inc.get("Device")
+        if did:
+            if did not in incident_map_local:
+                incident_map_local[did] = []
+            incident_map_local[did].append(inc)
+    
+    devices_with_issues = 0
+    
+    for dev in devices:
+        dev_incidents = incident_map_local.get(dev["id"], [])
+        
+        if dev_incidents:
+            devices_with_issues += 1
+            for inc in dev_incidents:
+                st.markdown(f"⚠️ **{dev['Name']}** - Incidencia activa: *\"{inc['Name']}\"*")
+        else:
+            st.markdown(f"✅ {dev['Name']}")
+    
+    if devices_with_issues > 0:
+        st.warning(f"⚠️ **ADVERTENCIA:** {devices_with_issues} dispositivo(s) tienen incidencias activas. Se recomienda resolver las incidencias antes de renovar.")
+    
+    st.markdown("---")
     
     conflicts = []
     for dev in devices:
@@ -2151,6 +2310,145 @@ elif st.session_state.menu == "Almacén":
                                 with cols[1]:
                                     if st.button("Devolver", key=f"return_{loc_id}_{d['id']}", use_container_width=True):
                                         confirm_return_device(d["Name"], lname, d["id"])
+
+    with tab3:
+        
+        expander_pending_key = "expander_pending_reception"
+        if expander_pending_key not in st.session_state.expander_states:
+            st.session_state.expander_states[expander_pending_key] = True
+        
+        with st.expander(f"📬 Pendientes de recepcionar ({len(pending_locs)})", expanded=st.session_state.expander_states[expander_pending_key]):
+            st.session_state.expander_states[expander_pending_key] = True
+            
+            if len(pending_locs) == 0:
+                st.info("No hay envíos pendientes de recepcionar.")
+            else:
+                for loc in pending_locs:
+                    lname = loc["name"]
+                    loc_id = loc["id"]
+                    device_count = loc["device_count"]
+                    end_date_obj = loc["end_date_obj"]
+                    
+                    relative_date = format_relative_date(end_date_obj)
+                    
+                    days_late = (date.today() - end_date_obj).days
+                    
+                    if days_late > 2:
+                        status_icon = "🔴"
+                    else:
+                        status_icon = "⚠️"
+                    
+                    pending_loc_expander_key = f"expander_pending_loc_{loc_id}"
+                    if pending_loc_expander_key not in st.session_state.expander_states:
+                        st.session_state.expander_states[pending_loc_expander_key] = False
+                    
+                    with st.expander(f"{status_icon} {lname} 🥽 {device_count} 📅 Terminó {relative_date}", expanded=st.session_state.expander_states[pending_loc_expander_key]):
+                        st.session_state.expander_states[pending_loc_expander_key] = True
+                        
+                        devices = all_devices
+                        
+                        assigned = [
+                            d for d in devices
+                            if loc_id in d["location_ids"]
+                        ]
+                        
+                        st.caption(f"Dispositivos pendientes de recepcionar:")
+                        
+                        with st.container(border=False):
+                            for d in assigned:
+                                cols = st.columns([8, 2])
+                                
+                                with cols[0]:
+                                    subtitle = get_location_types_for_device(d, locations_map)
+                                    inc = incidence_map.get(d["id"], {"active": 0, "total": 0})
+                                    card(
+                                        d["Name"],
+                                        location_types=subtitle,
+                                        incident_counts=(inc["active"], inc["total"])
+                                    )
+                                
+                                with cols[1]:
+                                    if st.button("Check-In", key=f"checkin_{d['id']}", use_container_width=True):
+                                        confirm_checkin(d["Name"], lname, d["id"], loc_id, d)
+                        
+                        st.markdown("---")
+                        
+                        if st.button("📦 Reasignar a nuevo proyecto", key=f"toggle_reassign_{loc_id}", use_container_width=True):
+                            reassign_key = f"expander_reassign_{loc_id}"
+                            if reassign_key not in st.session_state.expander_states:
+                                st.session_state.expander_states[reassign_key] = False
+                            st.session_state.expander_states[reassign_key] = not st.session_state.expander_states[reassign_key]
+                            st.rerun()
+                        
+                        reassign_expander_key = f"expander_reassign_{loc_id}"
+                        if reassign_expander_key not in st.session_state.expander_states:
+                            st.session_state.expander_states[reassign_expander_key] = False
+                        
+                        if st.session_state.expander_states[reassign_expander_key]:
+                            with st.container(border=True):
+                                st.subheader("Reasignar dispositivos pendientes")
+                                st.caption(f"Se hará check-in automático de {len(assigned)} dispositivos y se reasignarán al nuevo proyecto")
+                                
+                                new_client_name = st.text_input(
+                                    "Nombre del nuevo cliente/proyecto",
+                                    key=f"reassign_name_{loc_id}"
+                                )
+                                
+                                col_start, col_end = st.columns(2)
+                                
+                                with col_start:
+                                    new_start = st.date_input(
+                                        "Fecha salida",
+                                        value=date.today(),
+                                        key=f"reassign_start_{loc_id}"
+                                    )
+                                
+                                with col_end:
+                                    new_end = st.date_input(
+                                        "Fecha regreso",
+                                        value=date.today() + timedelta(days=7),
+                                        key=f"reassign_end_{loc_id}"
+                                    )
+                                
+                                col_confirm, col_cancel = st.columns(2)
+                                
+                                with col_confirm:
+                                    if st.button("Confirmar reasignación", key=f"confirm_reassign_{loc_id}", use_container_width=True, type="primary"):
+                                        if not new_client_name or new_client_name.strip() == "":
+                                            show_feedback('error', "Debes escribir el nombre del cliente", duration=2)
+                                        elif new_start > new_end:
+                                            show_feedback('error', "La fecha de salida no puede ser posterior a la de regreso", duration=3)
+                                        else:
+                                            device_ids = [d["id"] for d in assigned]
+                                            confirm_reassign_pending(new_client_name, assigned, new_start, new_end, loc_id, lname, device_ids)
+                                
+                                with col_cancel:
+                                    if st.button("Cancelar", key=f"cancel_reassign_{loc_id}", use_container_width=True):
+                                        st.session_state.expander_states[reassign_expander_key] = False
+                                        st.rerun()
+        
+        expander_historic_key = "expander_historic"
+        if expander_historic_key not in st.session_state.expander_states:
+            st.session_state.expander_states[expander_historic_key] = False
+        
+        with st.expander(f"📚 Histórico (últimos 30 días) ({len(historic_locs)})", expanded=st.session_state.expander_states[expander_historic_key]):
+            st.session_state.expander_states[expander_historic_key] = True
+            
+            if len(historic_locs) == 0:
+                st.info("No hay envíos en el histórico de los últimos 30 días.")
+            else:
+                for loc in historic_locs:
+                    lname = loc["name"]
+                    device_count = loc["device_count"]
+                    checkin_date = loc.get("checkin_date")
+                    
+                    if checkin_date:
+                        checkin_fmt = fmt(checkin_date)
+                        status_text = f"Recepcionado el {checkin_fmt}"
+                    else:
+                        status_text = "Completado"
+                    
+                    st.markdown(f"⚫ **{lname}** 🥽 {device_count} 📅 {status_text}")
 
 elif st.session_state.menu == "Incidencias":
     st.title("Incidencias en dispositivos")
