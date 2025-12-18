@@ -494,9 +494,10 @@ def confirm_end_shipment(location_name, device_count, location_id):
                 )
                 
                 if update_response.status_code == 200:
-                    q.clear()
-                    load_pending_reception_locations.clear()
-                    load_active_client_locations.clear()
+                    clear_cache_selective(
+                        active_locs=True,
+                        pending_locs=True
+                    )
                     show_feedback('success', "Envío finalizado", duration=1.5)
                     time.sleep(1.5)
                     st.rerun()
@@ -603,12 +604,12 @@ def confirm_checkin(device_name, location_name, device_id, location_id, device_d
                     resp = assign_device(device_id, office_id())
                     
                     if resp.status_code == 200:
-                        clear_cache_selective(
-                            pending_locs=True,
-                            historic_locs=True
-                        )
-                        show_feedback('success', "Check-in completado", duration=1.5)
-                        time.sleep(1.5)
+                        load_devices.clear()
+                        load_pending_reception_locations.clear()
+                        load_historic_client_locations.clear()
+                        q.clear()
+                        st.session_state.keep_almacen_tab = True
+                        st.toast("✅ Check-in completado", icon="✅")
                         st.rerun()
                     else:
                         show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
@@ -1298,11 +1299,12 @@ def load_active_client_locations():
         if ed:
             end_date = iso_to_date(ed)
             
-            if end_date < today:
+            days_until_end = (end_date - today).days
+            
+            if days_until_end < 1:
                 continue
             
             days_since_start = (today - start_date).days
-            days_until_end = (end_date - today).days
             total_days = (end_date - start_date).days
         else:
             end_date = None
@@ -1444,10 +1446,10 @@ def load_historic_client_locations():
         if currently_assigned > 0:
             continue
         
-        if historic_count == 0:
+        if historic_count == 0 and end_date < today:
             continue
         
-        device_count = historic_count
+        device_count = historic_count if historic_count > 0 else 0
         
         out.append({
             "id": loc_id,
@@ -1853,18 +1855,18 @@ elif st.session_state.menu == "Gafas en casa":
     
     inh_ids = [p["id"] for p in inh]
     
-    inhouse_devices = [
-        d for d in devices
-        if any(l in inh_ids for l in d["location_ids"])
-    ]
-    
     expander_personal_key = "expander_personal_devices"
     if expander_personal_key not in st.session_state.expander_states:
         st.session_state.expander_states[expander_personal_key] = True
     
     with st.expander("Personal con dispositivos en casa", expanded=st.session_state.expander_states[expander_personal_key]):
         
-        inhouse_filtered, _ = smart_segmented_filter(inhouse_devices, key_prefix="inhouse")
+        devices_filtered, _ = smart_segmented_filter(devices, key_prefix="inhouse")
+        
+        inhouse_filtered = [
+            d for d in devices_filtered
+            if any(l in inh_ids for l in d["location_ids"])
+        ]
         
         people_devices = {p["id"]: [] for p in inh}
         for d in inhouse_filtered:
@@ -1903,18 +1905,18 @@ elif st.session_state.menu == "Gafas en casa":
                             if st.button("Devolver", key=f"rm_{d['id']}", use_container_width=True):
                                 confirm_return_device(d["Name"], pname, d["id"])
     
-    office_devices = [
-        d for d in devices
-        if oid in d["location_ids"]
-    ]
-    
     expander_office_key = "expander_office_devices"
     if expander_office_key not in st.session_state.expander_states:
         st.session_state.expander_states[expander_office_key] = False
     
     with st.expander("Otras gafas disponibles en oficina", expanded=st.session_state.expander_states[expander_office_key]):
         
-        office_filtered, _ = smart_segmented_filter(office_devices, key_prefix="office")
+        devices_filtered_office, _ = smart_segmented_filter(devices, key_prefix="office")
+        
+        office_filtered = [
+            d for d in devices_filtered_office
+            if oid in d["location_ids"]
+        ]
         
         with st.container(height=400, border=True):
             for d in office_filtered:
@@ -1949,7 +1951,6 @@ elif st.session_state.menu == "Gafas en casa":
             
             if st.button("Asignar seleccionadas", use_container_width=True):
                 confirm_assign_to_person(dest, sel_count, dest_id, st.session_state.sel2)
-
 
 elif st.session_state.menu == "Almacén":
     st.title("📦 Almacén")
@@ -2093,7 +2094,10 @@ elif st.session_state.menu == "Almacén":
                                             
                                             if update_response.status_code == 200:
                                                 clear_cache_selective(
-                                                    future_locs=True
+                                                    future_locs=True,
+                                                    active_locs=True,
+                                                    pending_locs=True,
+                                                    historic_locs=True
                                                 )
                                                 
                                                 feedback_placeholder.empty()
