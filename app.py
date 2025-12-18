@@ -209,14 +209,131 @@ def assign_device(dev_id, loc_id):
         json={"properties": {"Location": {"relation": [{"id": loc_id}]}}},
         headers=headers
     )
-    load_devices.clear()
-    load_future_client_locations.clear()
-    load_active_client_locations.clear()
-    load_pending_reception_locations.clear()
-    load_historic_client_locations.clear()
+    clear_cache_selective(
+        devices=True,
+        future_locs=True,
+        active_locs=True,
+        pending_locs=True,
+        historic_locs=True
+    )
+    return response
+
+def clear_cache_selective(devices=False, locations=False, incidents=False, 
+                          future_locs=False, active_locs=False, 
+                          pending_locs=False, historic_locs=False):
+    
+    if devices:
+        load_devices.clear()
+    
+    if locations:
+        load_locations_map.clear()
+    
+    if incidents:
+        load_active_incidents.clear()
+        load_past_incidents.clear()
+        load_incidence_map.clear()
+    
+    if future_locs:
+        load_future_client_locations.clear()
+    
+    if active_locs:
+        load_active_client_locations.clear()
+    
+    if pending_locs:
+        load_pending_reception_locations.clear()
+    
+    if historic_locs:
+        load_historic_client_locations.clear()
+    
     q.clear()
     preload_all_data.clear()
-    return response
+
+@st.dialog("⚠️ Asignar dispositivos a cliente")
+def confirm_assign_client(client_name, device_count, start_date, end_date, selected_devices):
+    st.write(f"**Vas a crear un nuevo envío:**")
+    st.write(f"• Cliente: **{client_name}**")
+    st.write(f"• Dispositivos: **{device_count}**")
+    st.write(f"• Desde: **{start_date.strftime('%d/%m/%Y')}**")
+    st.write(f"• Hasta: **{end_date.strftime('%d/%m/%Y')}**")
+    
+    total_days = (end_date - start_date).days
+    st.write(f"• Duración: **{total_days} días**")
+    
+    st.markdown("---")
+    st.write("📦 **Dispositivos a asignar:**")
+    
+    devices = load_devices()
+    incidents = load_active_incidents()
+    incident_map_local = {}
+    for inc in incidents:
+        did = inc.get("Device")
+        if did:
+            if did not in incident_map_local:
+                incident_map_local[did] = []
+            incident_map_local[did].append(inc)
+    
+    devices_with_issues = 0
+    
+    for dev_id in selected_devices:
+        dev = next((d for d in devices if d["id"] == dev_id), None)
+        if not dev:
+            continue
+        
+        dev_incidents = incident_map_local.get(dev_id, [])
+        
+        if dev_incidents:
+            devices_with_issues += 1
+            for inc in dev_incidents:
+                st.markdown(f"⚠️ **{dev['Name']}** - Incidencia activa: *\"{inc['Name']}\"*")
+        else:
+            st.markdown(f"✅ {dev['Name']}")
+    
+    if devices_with_issues > 0:
+        st.warning(f"⚠️ **ADVERTENCIA:** {devices_with_issues} dispositivo(s) tienen incidencias activas. Se recomienda resolver las incidencias antes de asignar.")
+    
+    st.markdown("---")
+    st.info("Se creará una nueva ubicación y se asignarán los dispositivos seleccionados.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancelar", use_container_width=True):
+            st.rerun()
+    with col2:
+        if st.button("Confirmar", use_container_width=True, type="primary"):
+            with st.spinner("Asignando dispositivos..."):
+                response = requests.post(
+                    "https://api.notion.com/v1/pages", 
+                    headers=headers,
+                    json={
+                        "parent": {"database_id": LOCATIONS_ID},
+                        "properties": {
+                            "Name": {"title": [{"text": {"content": client_name}}]},
+                            "Type": {"select": {"name": "Client"}},
+                            "Start Date": {"date": {"start": start_date.isoformat()}},
+                            "End Date": {"date": {"start": end_date.isoformat()}}
+                        }
+                    }
+                )
+                
+                if response.status_code == 200:
+                    new_loc_id = response.json()["id"]
+                    
+                    success_count = 0
+                    for did in selected_devices:
+                        resp = assign_device(did, new_loc_id)
+                        if resp.status_code == 200:
+                            success_count += 1
+                    
+                    clear_cache_selective(
+                        locations=True,
+                        future_locs=True
+                    )
+                    
+                    show_feedback('success', f"{success_count} dispositivos asignados correctamente", duration=1.5)
+                    time.sleep(1.5)
+                    st.rerun()
+                else:
+                    show_feedback('error', f"Error al crear ubicación: {response.status_code}", duration=3)
 
 @st.dialog("⚠️ Check-In de dispositivo")
 def confirm_checkin(device_name, location_name, device_id, location_id, device_data):
@@ -293,8 +410,6 @@ def confirm_return_device(device_name, location_name, device_id):
                 resp = assign_device(device_id, office_id())
                 
                 if resp.status_code == 200:
-                    load_devices.clear()
-                    preload_all_data.clear()
                     show_feedback('success', "Dispositivo devuelto a oficina", duration=1.5)
                     time.sleep(1.5)
                     st.rerun()
@@ -318,8 +433,6 @@ def confirm_remove_device(device_name, location_name, device_id):
                 resp = assign_device(device_id, office_id())
                 
                 if resp.status_code == 200:
-                    load_devices.clear()
-                    preload_all_data.clear()
                     show_feedback('success', "Dispositivo quitado", duration=1.5)
                     time.sleep(1.5)
                     st.rerun()
@@ -346,9 +459,9 @@ def confirm_delete_shipment(location_name, location_id):
                 )
                 
                 if delete_response.status_code == 200:
-                    load_future_client_locations.clear()
-                    q.clear()
-                    preload_all_data.clear()
+                    clear_cache_selective(
+                        future_locs=True
+                    )
                     show_feedback('success', "Envío eliminado", duration=1.5)
                     time.sleep(1.5)
                     st.rerun()
@@ -381,10 +494,9 @@ def confirm_end_shipment(location_name, device_count, location_id):
                 )
                 
                 if update_response.status_code == 200:
-                    load_active_client_locations.clear()
-                    load_pending_reception_locations.clear()
                     q.clear()
-                    preload_all_data.clear()
+                    load_pending_reception_locations.clear()
+                    load_active_client_locations.clear()
                     show_feedback('success', "Envío finalizado", duration=1.5)
                     time.sleep(1.5)
                     st.rerun()
@@ -444,9 +556,6 @@ def confirm_add_devices(location_name, device_count, location_id, selected_devic
                     if resp.status_code == 200:
                         success_count += 1
                 
-                load_devices.clear()
-                preload_all_data.clear()
-                
                 show_feedback('success', f"{success_count} dispositivos añadidos", duration=1.5)
                 time.sleep(1.5)
                 st.rerun()
@@ -494,13 +603,10 @@ def confirm_checkin(device_name, location_name, device_id, location_id, device_d
                     resp = assign_device(device_id, office_id())
                     
                     if resp.status_code == 200:
-                        st.session_state.keep_almacen_tab = True
-                        
-                        load_devices.clear()
-                        load_pending_reception_locations.clear()
-                        load_historic_client_locations.clear()
-                        q.clear()
-                        preload_all_data.clear()
+                        clear_cache_selective(
+                            pending_locs=True,
+                            historic_locs=True
+                        )
                         show_feedback('success', "Check-in completado", duration=1.5)
                         time.sleep(1.5)
                         st.rerun()
@@ -559,9 +665,6 @@ def confirm_assign_to_person(person_name, device_count, person_id, selected_devi
                     resp = assign_device(did, person_id)
                     if resp.status_code == 200:
                         success_count += 1
-                
-                load_devices.clear()
-                preload_all_data.clear()
                 
                 show_feedback('success', f"{success_count} dispositivos asignados", duration=1.5)
                 time.sleep(1.5)
@@ -685,13 +788,12 @@ def confirm_reassign_pending(client_name, devices, start_date, end_date, old_loc
                         if resp.status_code == 200:
                             assign_success += 1
                     
-                    load_devices.clear()
-                    load_future_client_locations.clear()
-                    load_pending_reception_locations.clear()
-                    load_historic_client_locations.clear()
-                    load_locations_map.clear()
-                    q.clear()
-                    preload_all_data.clear()
+                    clear_cache_selective(
+                        locations=True,
+                        future_locs=True,
+                        pending_locs=True,
+                        historic_locs=True
+                    )
                     
                     show_feedback('success', f"Check-in: {checkin_success}/{len(devices)} | Asignados: {assign_success}/{len(devices)}", duration=2)
                     time.sleep(2)
@@ -817,14 +919,13 @@ def confirm_renew_rental(client_name, devices, start_date, end_date, old_loc_id,
                         if resp.status_code == 200:
                             assign_success += 1
                     
-                    load_devices.clear()
-                    load_active_client_locations.clear()
-                    load_future_client_locations.clear()
-                    load_pending_reception_locations.clear()
-                    load_historic_client_locations.clear()
-                    load_locations_map.clear()
-                    q.clear()
-                    preload_all_data.clear()
+                    clear_cache_selective(
+                        locations=True,
+                        active_locs=True,
+                        future_locs=True,
+                        pending_locs=True,
+                        historic_locs=True
+                    )
                     
                     show_feedback('success', f"Renovación completada: Check-in {checkin_success}/{len(devices)} | Asignados {assign_success}/{len(devices)}", duration=2)
                     time.sleep(2)
@@ -1314,7 +1415,7 @@ def load_historic_client_locations():
         
         end_date = iso_to_date(ed)
         
-        if end_date >= today or end_date < thirty_days_ago:
+        if end_date > today or end_date < thirty_days_ago:
             continue
         
         try:
@@ -1991,9 +2092,9 @@ elif st.session_state.menu == "Almacén":
                                             )
                                             
                                             if update_response.status_code == 200:
-                                                load_future_client_locations.clear()
-                                                q.clear()
-                                                preload_all_data.clear()
+                                                clear_cache_selective(
+                                                    future_locs=True
+                                                )
                                                 
                                                 feedback_placeholder.empty()
                                                 show_feedback('success', "Fechas actualizadas correctamente", duration=1.5)
@@ -2630,11 +2731,9 @@ elif st.session_state.menu == "Incidencias":
                                     st.session_state.expander_states["add_new_incident_expander"] = False
                                 st.session_state.force_incidents_tab = True
                                 
-                                load_active_incidents.clear()
-                                load_past_incidents.clear()
-                                load_incidence_map.clear()
-                                q.clear()
-                                preload_all_data.clear()
+                                clear_cache_selective(
+                                    incidents=True
+                                )
 
                                 feedback.empty()
                                 show_feedback("success", "Incidencia resuelta", duration=1.5)
@@ -2746,12 +2845,11 @@ elif st.session_state.menu == "Incidencias":
                                 st.session_state.expander_states[add_new_expanded_key] = False
                                 st.session_state.force_incidents_tab = True
                                 
-                                load_active_incidents.clear()
-                                load_incidence_map.clear()
-                                q.clear()
-                                preload_all_data.clear()
+                                clear_cache_selective(
+                                    incidents=True
+                                )
 
                                 feedback.empty()
                                 show_feedback("success", "Incidencia creada", duration=1.5)
                                 time.sleep(1.5)
-                                st.rerun()    
+                                st.rerun()
