@@ -156,6 +156,14 @@ def get_shipment_status_icon(loc_id):
     status = st.session_state.get(f"status_{loc_id}", "📋 Planificado")
     return status.split()[0]
 
+def preserve_expander_state(expander_key, is_primary=True):
+    if expander_key not in st.session_state.expander_states:
+        st.session_state.expander_states[expander_key] = is_primary
+    return st.session_state.expander_states[expander_key]
+
+def set_expander_open(expander_key):
+    st.session_state.expander_states[expander_key] = True
+
 @st.cache_data(ttl=300)
 def q(db, payload=None):
     if payload is None:
@@ -378,8 +386,8 @@ def confirm_checkin(device_name, location_name, device_id, location_id, device_d
                     resp = assign_device(device_id, office_id())
                     
                     if resp.status_code == 200:
+                        set_expander_open(f"expander_pending_loc_{location_id}")
                         st.session_state.keep_almacen_tab = True
-                        st.session_state.keep_expander_open = f"expander_pending_loc_{location_id}"
                         
                         load_devices.clear()
                         load_pending_reception_locations.clear()
@@ -393,7 +401,7 @@ def confirm_checkin(device_name, location_name, device_id, location_id, device_d
                         show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
 
 @st.dialog("⚠️ Devolver dispositivo a oficina")
-def confirm_return_device(device_name, location_name, device_id):
+def confirm_return_device(device_name, location_name, device_id, expander_key):
     st.write(f"**Vas a devolver el dispositivo:**")
     st.write(f"• Dispositivo: **{device_name}**")
     st.write(f"• Desde: **{location_name}**")
@@ -410,6 +418,7 @@ def confirm_return_device(device_name, location_name, device_id):
                 resp = assign_device(device_id, office_id())
                 
                 if resp.status_code == 200:
+                    set_expander_open(expander_key)
                     show_feedback('success', "Dispositivo devuelto a oficina", duration=1.5)
                     time.sleep(1.5)
                     st.rerun()
@@ -417,7 +426,7 @@ def confirm_return_device(device_name, location_name, device_id):
                     show_feedback('error', f"Error: {resp.status_code}", duration=2)
 
 @st.dialog("⚠️ Quitar dispositivo del envío")
-def confirm_remove_device(device_name, location_name, device_id):
+def confirm_remove_device(device_name, location_name, device_id, expander_key):
     st.write(f"**Vas a quitar el dispositivo:**")
     st.write(f"• Dispositivo: **{device_name}**")
     st.write(f"• Del envío: **{location_name}**")
@@ -433,6 +442,7 @@ def confirm_remove_device(device_name, location_name, device_id):
                 resp = assign_device(device_id, office_id())
                 
                 if resp.status_code == 200:
+                    set_expander_open(expander_key)
                     show_feedback('success', "Dispositivo quitado", duration=1.5)
                     time.sleep(1.5)
                     st.rerun()
@@ -505,7 +515,7 @@ def confirm_end_shipment(location_name, device_count, location_id):
                     show_feedback('error', f"Error: {update_response.status_code}", duration=2)
 
 @st.dialog("⚠️ Añadir dispositivos al envío")
-def confirm_add_devices(location_name, device_count, location_id, selected_devices):
+def confirm_add_devices(location_name, device_count, location_id, selected_devices, expander_key):
     st.write(f"**Vas a añadir dispositivos:**")
     st.write(f"• Al envío: **{location_name}**")
     st.write(f"• Cantidad: **{device_count}**")
@@ -557,62 +567,10 @@ def confirm_add_devices(location_name, device_count, location_id, selected_devic
                     if resp.status_code == 200:
                         success_count += 1
                 
+                set_expander_open(expander_key)
                 show_feedback('success', f"{success_count} dispositivos añadidos", duration=1.5)
                 time.sleep(1.5)
                 st.rerun()
-
-@st.dialog("⚠️ Check-In de dispositivo")
-def confirm_checkin(device_name, location_name, device_id, location_id, device_data):
-    st.write(f"**Vas a recepcionar el dispositivo:**")
-    st.write(f"• Dispositivo: **{device_name}**")
-    st.write(f"• Del envío: **{location_name}**")
-    st.info("Se registrará en el histórico y volverá a oficina.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancelar", use_container_width=True):
-            st.rerun()
-    with col2:
-        if st.button("Confirmar", use_container_width=True, type="primary"):
-            with st.spinner("Procesando Check-In..."):
-                payload = {
-                    "parent": {"database_id": HISTORIC_ID},
-                    "properties": {
-                        "Name": {"title": [{"text": {"content": device_data['Name']}}]},
-                        "Tags": {"select": {"name": device_data["Tags"]}} if device_data.get("Tags") else None,
-                        "SN": {"rich_text": [{"text": {"content": device_data.get("SN", "")}}]},
-                        "Location": {"relation": [{"id": location_id}]},
-                        "Start Date": {"date": {"start": device_data["Start"]}} if device_data.get("Start") else None,
-                        "End Date": {"date": {"start": device_data["End"]}} if device_data.get("End") else None,
-                        "Check In": {"date": {"start": date.today().isoformat()}}
-                    }
-                }
-                
-                payload["properties"] = {
-                    k: v for k, v in payload["properties"].items() if v is not None
-                }
-                
-                r = requests.post(
-                    "https://api.notion.com/v1/pages",
-                    headers=headers,
-                    json=payload
-                )
-                
-                if r.status_code != 200:
-                    show_feedback('error', f"Error al registrar en histórico: {r.status_code}", duration=3)
-                else:
-                    resp = assign_device(device_id, office_id())
-                    
-                    if resp.status_code == 200:
-                        load_devices.clear()
-                        load_pending_reception_locations.clear()
-                        load_historic_client_locations.clear()
-                        q.clear()
-                        st.session_state.keep_almacen_tab = True
-                        st.toast("✅ Check-in completado", icon="✅")
-                        st.rerun()
-                    else:
-                        show_feedback('error', f"Error al mover a oficina: {resp.status_code}", duration=3)
 
 @st.dialog("⚠️ Asignar dispositivos a persona")
 def confirm_assign_to_person(person_name, device_count, person_id, selected_devices):
@@ -1713,7 +1671,7 @@ for key, default in [
         st.session_state[key] = default
 
 
-with st.spinner("📄 Cargando datos desde Notion..."):
+with st.spinner("🔄 Cargando datos desde Notion..."):
     preloaded_data = preload_all_data()
 
 locations_map = preloaded_data['locations_map']
@@ -1856,10 +1814,8 @@ elif st.session_state.menu == "Gafas en casa":
     inh_ids = [p["id"] for p in inh]
     
     expander_personal_key = "expander_personal_devices"
-    if expander_personal_key not in st.session_state.expander_states:
-        st.session_state.expander_states[expander_personal_key] = True
     
-    with st.expander("Personal con dispositivos en casa", expanded=st.session_state.expander_states[expander_personal_key]):
+    with st.expander("Personal con dispositivos en casa", expanded=preserve_expander_state(expander_personal_key, is_primary=True)):
         
         devices_filtered, _ = smart_segmented_filter(devices, key_prefix="inhouse")
         
@@ -1885,10 +1841,8 @@ elif st.session_state.menu == "Gafas en casa":
                 devs = people_devices.get(pid, [])
                 
                 person_expander_key = f"expander_person_{pid}"
-                if person_expander_key not in st.session_state.expander_states:
-                    st.session_state.expander_states[person_expander_key] = False
                 
-                with st.expander(f"{pname} ({len(devs)})", expanded=st.session_state.expander_states[person_expander_key]):
+                with st.expander(f"{pname} ({len(devs)})", expanded=preserve_expander_state(person_expander_key, is_primary=False)):
                     
                     for d in devs:
                         cols = st.columns([8, 2])
@@ -1903,13 +1857,11 @@ elif st.session_state.menu == "Gafas en casa":
                         
                         with cols[1]:
                             if st.button("Devolver", key=f"rm_{d['id']}", use_container_width=True):
-                                confirm_return_device(d["Name"], pname, d["id"])
+                                confirm_return_device(d["Name"], pname, d["id"], person_expander_key)
     
     expander_office_key = "expander_office_devices"
-    if expander_office_key not in st.session_state.expander_states:
-        st.session_state.expander_states[expander_office_key] = False
     
-    with st.expander("Otras gafas disponibles en oficina", expanded=st.session_state.expander_states[expander_office_key]):
+    with st.expander("Otras gafas disponibles en oficina", expanded=preserve_expander_state(expander_office_key, is_primary=True)):
         
         devices_filtered_office, _ = smart_segmented_filter(devices, key_prefix="office")
         
@@ -2007,10 +1959,8 @@ elif st.session_state.menu == "Almacén":
                 status_icon = get_shipment_status_icon(loc_id)
                 
                 shipment_expander_key = f"expander_shipment_{loc_id}"
-                if shipment_expander_key not in st.session_state.expander_states:
-                    st.session_state.expander_states[shipment_expander_key] = False
                 
-                with st.expander(f"{status_icon} {lname} 🥽 {device_count} 📅 Sale {relative_start}", expanded=st.session_state.expander_states[shipment_expander_key]):
+                with st.expander(f"{status_icon} {lname} 🥽 {device_count} 📅 Sale {relative_start}", expanded=preserve_expander_state(shipment_expander_key, is_primary=False)):
                     
                     devices = all_devices
                     
@@ -2044,12 +1994,10 @@ elif st.session_state.menu == "Almacén":
                     ]
                     
                     expander_dates_key = f"expander_dates_{loc_id}"
-                    if expander_dates_key not in st.session_state.expander_states:
-                        st.session_state.expander_states[expander_dates_key] = False
                     
                     total_days_rental = (le - ls).days if ls and le else 0
                     
-                    with st.expander(f"📅 Fechas [{fmt(loc['start'])} → {fmt(loc['end'])}] • {total_days_rental} días", expanded=st.session_state.expander_states[expander_dates_key]):
+                    with st.expander(f"📅 Fechas [{fmt(loc['start'])} → {fmt(loc['end'])}] • {total_days_rental} días", expanded=preserve_expander_state(expander_dates_key, is_primary=False)):
                         
                         with st.form(key=f"edit_dates_{loc_id}"):
                             st.subheader("Editar fechas del envío")
@@ -2100,6 +2048,9 @@ elif st.session_state.menu == "Almacén":
                                                     historic_locs=True
                                                 )
                                                 
+                                                set_expander_open(shipment_expander_key)
+                                                set_expander_open(expander_dates_key)
+                                                
                                                 feedback_placeholder.empty()
                                                 show_feedback('success', "Fechas actualizadas correctamente", duration=1.5)
                                                 time.sleep(1.5)
@@ -2109,10 +2060,8 @@ elif st.session_state.menu == "Almacén":
                                                 show_feedback('error', f"Error al actualizar: {update_response.status_code}", duration=3)
                     
                     expander_devices_key = f"expander_devices_{loc_id}"
-                    if expander_devices_key not in st.session_state.expander_states:
-                        st.session_state.expander_states[expander_devices_key] = False
                     
-                    with st.expander(f"🥽 Dispositivos [{len(assigned)} asignados]", expanded=st.session_state.expander_states[expander_devices_key]):
+                    with st.expander(f"🥽 Dispositivos [{len(assigned)} asignados]", expanded=preserve_expander_state(expander_devices_key, is_primary=False)):
                         
                         if len(assigned) == 0:
                             st.warning("Este envío no tiene dispositivos asignados")
@@ -2137,13 +2086,11 @@ elif st.session_state.menu == "Almacén":
                                     
                                     with cols[1]:
                                         if st.button("Quitar", key=f"rm_{loc_id}_{d['id']}", use_container_width=True):
-                                            confirm_remove_device(d["Name"], lname, d["id"])
+                                            confirm_remove_device(d["Name"], lname, d["id"], shipment_expander_key)
                         
                         expander_add_key = f"expander_add_{loc_id}"
-                        if expander_add_key not in st.session_state.expander_states:
-                            st.session_state.expander_states[expander_add_key] = False
                         
-                        with st.expander(f"➕ Añadir más dispositivos [{len(can_add)} disponibles]", expanded=st.session_state.expander_states[expander_add_key]):
+                        with st.expander(f"➕ Añadir más dispositivos [{len(can_add)} disponibles]", expanded=preserve_expander_state(expander_add_key, is_primary=False)):
                             
                             can_add_filtered, _ = smart_segmented_filter(can_add, key_prefix=f"canadd_{loc_id}")
                             
@@ -2186,7 +2133,7 @@ elif st.session_state.menu == "Almacén":
                                 
                                 with cols_bottom[1]:
                                     if st.button("Añadir", key=f"assign_btn_{loc_id}", use_container_width=True):
-                                        confirm_add_devices(lname, sel_count, loc_id, selected_ids)
+                                        confirm_add_devices(lname, sel_count, loc_id, selected_ids, shipment_expander_key)
                     
                     includes_headphones = st.checkbox(
                         "🎧 Incluye cascos",
@@ -2225,10 +2172,8 @@ elif st.session_state.menu == "Almacén":
                 days_text = f"Quedan {days_until_end} de {total_days} días"
                 
                 active_expander_key = f"expander_active_{loc_id}"
-                if active_expander_key not in st.session_state.expander_states:
-                    st.session_state.expander_states[active_expander_key] = False
                 
-                with st.expander(f"{status_circle} 📦 {lname} 🥽 {device_count} 📅 {days_text}", expanded=st.session_state.expander_states[active_expander_key]):
+                with st.expander(f"{status_circle} 📦 {lname} 🥽 {device_count} 📅 {days_text}", expanded=preserve_expander_state(active_expander_key, is_primary=False)):
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -2339,7 +2284,7 @@ elif st.session_state.menu == "Almacén":
                                 
                                 with cols[1]:
                                     if st.button("Devolver", key=f"return_{loc_id}_{d['id']}", use_container_width=True):
-                                        confirm_return_device(d["Name"], lname, d["id"])
+                                        confirm_return_device(d["Name"], lname, d["id"], active_expander_key)
             
             for loc in active_without_end:
                 lname = loc["name"]
@@ -2351,10 +2296,8 @@ elif st.session_state.menu == "Almacén":
                 days_text = f"Llevan {days_since_start} días"
                 
                 active_indef_expander_key = f"expander_active_indef_{loc_id}"
-                if active_indef_expander_key not in st.session_state.expander_states:
-                    st.session_state.expander_states[active_indef_expander_key] = False
                 
-                with st.expander(f"{status_circle} 📦 {lname} 🥽 {device_count} 📅 {days_text}", expanded=st.session_state.expander_states[active_indef_expander_key]):
+                with st.expander(f"{status_circle} 📦 {lname} 🥽 {device_count} 📅 {days_text}", expanded=preserve_expander_state(active_indef_expander_key, is_primary=True)):
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -2394,16 +2337,14 @@ elif st.session_state.menu == "Almacén":
                                 
                                 with cols[1]:
                                     if st.button("Devolver", key=f"return_{loc_id}_{d['id']}", use_container_width=True):
-                                        confirm_return_device(d["Name"], lname, d["id"])
+                                        confirm_return_device(d["Name"], lname, d["id"], active_indef_expander_key)
     
     
     elif selected_almacen == opciones_almacen[2]:
         
         expander_pending_key = "expander_pending_reception"
-        if expander_pending_key not in st.session_state.expander_states:
-            st.session_state.expander_states[expander_pending_key] = True
         
-        with st.expander(f"📬 Pendientes de recepcionar ({len(pending_locs)})", expanded=st.session_state.expander_states[expander_pending_key]):
+        with st.expander(f"📬 Pendientes de recepcionar ({len(pending_locs)})", expanded=preserve_expander_state(expander_pending_key, is_primary=True)):
             
             if len(pending_locs) == 0:
                 st.info("No hay envíos pendientes de recepcionar.")
@@ -2424,10 +2365,8 @@ elif st.session_state.menu == "Almacén":
                         status_icon = "⚠️"
                     
                     pending_loc_expander_key = f"expander_pending_loc_{loc_id}"
-                    if pending_loc_expander_key not in st.session_state.expander_states:
-                        st.session_state.expander_states[pending_loc_expander_key] = False
                     
-                    with st.expander(f"{status_icon} {lname} 🥽 {device_count} 📅 Terminó {relative_date}", expanded=st.session_state.expander_states[pending_loc_expander_key]):
+                    with st.expander(f"{status_icon} {lname} 🥽 {device_count} 📅 Terminó {relative_date}", expanded=preserve_expander_state(pending_loc_expander_key, is_primary=False)):
                         
                         devices = all_devices
                         
@@ -2512,10 +2451,8 @@ elif st.session_state.menu == "Almacén":
                                         st.rerun()
         
         expander_historic_key = "expander_historic"
-        if expander_historic_key not in st.session_state.expander_states:
-            st.session_state.expander_states[expander_historic_key] = False
         
-        with st.expander(f"📚 Histórico (últimos 30 días) ({len(historic_locs)})", expanded=st.session_state.expander_states[expander_historic_key]):
+        with st.expander(f"📚 Histórico (últimos 30 días) ({len(historic_locs)})", expanded=preserve_expander_state(expander_historic_key)):
             
             if len(historic_locs) == 0:
                 st.info("No hay envíos en el histórico de los últimos 30 días.")
@@ -2562,10 +2499,8 @@ elif st.session_state.menu == "Incidencias":
     total_active = sum(len(v["active"]) for v in incidents_by_device.values())
 
     expander_incidents_key = "expander_incidents_main"
-    if expander_incidents_key not in st.session_state.expander_states:
-        st.session_state.expander_states[expander_incidents_key] = True
     
-    with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=st.session_state.expander_states[expander_incidents_key]):
+    with st.expander(f"Incidencias en dispositivos ({total_active} activas)", expanded=preserve_expander_state(expander_incidents_key, is_primary=True)):
         
         devices_with_incidents = [
             device_map[did] for did in incidents_by_device.keys() if did in device_map
@@ -2758,10 +2693,8 @@ elif st.session_state.menu == "Incidencias":
                 st.rerun()
 
     add_new_expanded_key = "add_new_incident_expander"
-    if add_new_expanded_key not in st.session_state.expander_states:
-        st.session_state.expander_states[add_new_expanded_key] = False
 
-    with st.expander("Añadir nueva incidencia", expanded=st.session_state.expander_states[add_new_expanded_key]):
+    with st.expander("Añadir nueva incidencia", expanded=preserve_expander_state(add_new_expanded_key, is_primary=False)):
 
         devices_with_location = [
             d for d in devices 
@@ -2856,4 +2789,4 @@ elif st.session_state.menu == "Incidencias":
                                 feedback.empty()
                                 show_feedback("success", "Incidencia creada", duration=1.5)
                                 time.sleep(1.5)
-                                st.rerun()
+                                st.rerun()    
